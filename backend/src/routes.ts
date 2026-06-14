@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
-import { books, borrowRecords, readingRecords, babyInfo, themes, interactionTypes } from './data';
-import { Book, BookStatus, BorrowRecord, ReadingRecord } from './types';
-import { recommendBooks, calculateBabyAgeMonths, isOverdue } from './utils';
+import { books, borrowRecords, readingRecords, babyInfo, themes, interactionTypes, rotationPlans } from './data';
+import { Book, BookStatus, BorrowRecord, ReadingRecord, RotationPlan, RotationItemStatus, RotationPlanStats } from './types';
+import { recommendBooks, calculateBabyAgeMonths, isOverdue, getWeekRange, generateRotationPlanItems } from './utils';
 
 const router = Router();
 
@@ -214,12 +214,13 @@ router.post('/reading-records', (req, res) => {
   }
   
   const durationNum = Math.max(0, Number(duration) || 0);
+  const finalReadDate = readDate || new Date().toISOString().split('T')[0];
   
   const newRecord: ReadingRecord = {
     id: uuidv4(),
     bookId,
     bookTitle: book.title,
-    readDate: readDate || new Date().toISOString().split('T')[0],
+    readDate: finalReadDate,
     duration: durationNum,
     babyAgeMonths: Number(babyAgeMonths) || calculateBabyAgeMonths(babyInfo.birthDate),
     reaction,
@@ -228,6 +229,28 @@ router.post('/reading-records', (req, res) => {
   };
   
   readingRecords.push(newRecord);
+  
+  const { start, end } = getWeekRange(new Date());
+  const currentPlan = rotationPlans.find(p => 
+    p.weekStartDate === start && p.weekEndDate === end && p.status === 'active'
+  );
+  
+  if (currentPlan) {
+    const planItem = currentPlan.items.find(i => i.bookId === bookId && i.status !== '已读' && i.status !== '跳过');
+    if (planItem) {
+      planItem.status = '已读';
+      planItem.readDate = finalReadDate;
+      planItem.readingRecordId = newRecord.id;
+      planItem.updatedAt = new Date().toISOString();
+      currentPlan.updatedAt = new Date().toISOString();
+      
+      const allCompleted = currentPlan.items.every(i => i.status === '已读' || i.status === '跳过');
+      if (allCompleted) {
+        currentPlan.status = 'completed';
+      }
+    }
+  }
+  
   res.status(201).json(newRecord);
 });
 
@@ -335,6 +358,244 @@ router.get('/themes', (req, res) => {
 
 router.get('/interaction-types', (req, res) => {
   res.json(interactionTypes);
+});
+
+router.get('/rotation-plans', (req, res) => {
+  const sorted = [...rotationPlans].sort((a, b) => 
+    new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
+  res.json(sorted);
+});
+
+router.get('/rotation-plans/current', (req, res) => {
+  const { start, end } = getWeekRange(new Date());
+  
+  let currentPlan = rotationPlans.find(p => 
+    p.weekStartDate === start && p.weekEndDate === end && p.status === 'active'
+  );
+  
+  if (!currentPlan) {
+    currentPlan = rotationPlans
+      .filter(p => p.status === 'active')
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+  }
+  
+  if (currentPlan) {
+    res.json(currentPlan);
+  } else {
+    res.status(404).json({ error: '暂无有效的轮换计划，请先生成' });
+  }
+});
+
+router.get('/rotation-plans/:id', (req, res) => {
+  const plan = rotationPlans.find(p => p.id === req.params.id);
+  if (!plan) {
+    res.status(404).json({ error: '轮换计划不存在' });
+    return;
+  }
+  res.json(plan);
+});
+
+router.post('/rotation-plans/generate', (req, res) => {
+  const { weekSize = 5 } = req.body;
+  const { start, end } = getWeekRange(new Date());
+  const babyAge = calculateBabyAgeMonths(babyInfo.birthDate);
+  
+  const existingPlan = rotationPlans.find(p => 
+    p.weekStartDate === start && p.weekEndDate === end
+  );
+  
+  if (existingPlan) {
+    res.status(400).json({ error: '本周轮换计划已存在' });
+    return;
+  }
+  
+  const items = generateRotationPlanItems(
+    books,
+    babyAge,
+    readingRecords.map(r => ({ bookId: r.bookId, readDate: r.readDate })),
+    Number(weekSize) || 5
+  );
+  
+  if (items.length === 0) {
+    res.status(400).json({ error: '没有可用于轮换的绘本，请检查绘本状态' });
+    return;
+  }
+  
+  const now = new Date().toISOString();
+  const newPlan: RotationPlan = {
+    id: uuidv4(),
+    weekStartDate: start,
+    weekEndDate: end,
+    babyAgeMonths: babyAge,
+    status: 'active',
+    items: items.map(item => ({
+      ...item,
+      id: uuidv4(),
+      createdAt: now,
+      updatedAt: now
+    })),
+    createdAt: now,
+    updatedAt: now
+  };
+  
+  rotationPlans.push(newPlan);
+  res.status(201).json(newPlan);
+});
+
+router.patch('/rotation-plans/:planId/items/:itemId/focus', (req, res) => {
+  const plan = rotationPlans.find(p => p.id === req.params.planId);
+  if (!plan) {
+    res.status(404).json({ error: '轮换计划不存在' });
+    return;
+  }
+  
+  const item = plan.items.find(i => i.id === req.params.itemId);
+  if (!item) {
+    res.status(404).json({ error: '计划项不存在' });
+    return;
+  }
+  
+  const { isFocus } = req.body;
+  item.isFocus = isFocus !== undefined ? Boolean(isFocus) : !item.isFocus;
+  item.updatedAt = new Date().toISOString();
+  plan.updatedAt = new Date().toISOString();
+  
+  res.json(item);
+});
+
+router.patch('/rotation-plans/:planId/items/:itemId/skip', (req, res) => {
+  const plan = rotationPlans.find(p => p.id === req.params.planId);
+  if (!plan) {
+    res.status(404).json({ error: '轮换计划不存在' });
+    return;
+  }
+  
+  const item = plan.items.find(i => i.id === req.params.itemId);
+  if (!item) {
+    res.status(404).json({ error: '计划项不存在' });
+    return;
+  }
+  
+  const { skipReason } = req.body;
+  item.status = '跳过';
+  item.skipReason = String(skipReason || '');
+  item.updatedAt = new Date().toISOString();
+  plan.updatedAt = new Date().toISOString();
+  
+  res.json(item);
+});
+
+router.patch('/rotation-plans/:planId/items/:itemId/unskip', (req, res) => {
+  const plan = rotationPlans.find(p => p.id === req.params.planId);
+  if (!plan) {
+    res.status(404).json({ error: '轮换计划不存在' });
+    return;
+  }
+  
+  const item = plan.items.find(i => i.id === req.params.itemId);
+  if (!item) {
+    res.status(404).json({ error: '计划项不存在' });
+    return;
+  }
+  
+  item.status = '待读';
+  item.skipReason = undefined;
+  item.updatedAt = new Date().toISOString();
+  plan.updatedAt = new Date().toISOString();
+  
+  res.json(item);
+});
+
+router.patch('/rotation-plans/:planId/items/:itemId/status', (req, res) => {
+  const plan = rotationPlans.find(p => p.id === req.params.planId);
+  if (!plan) {
+    res.status(404).json({ error: '轮换计划不存在' });
+    return;
+  }
+  
+  const item = plan.items.find(i => i.id === req.params.itemId);
+  if (!item) {
+    res.status(404).json({ error: '计划项不存在' });
+    return;
+  }
+  
+  const { status, readingRecordId, readDate } = req.body;
+  item.status = status as RotationItemStatus;
+  if (readingRecordId) item.readingRecordId = readingRecordId;
+  if (readDate) item.readDate = readDate;
+  item.updatedAt = new Date().toISOString();
+  plan.updatedAt = new Date().toISOString();
+  
+  const allCompleted = plan.items.every(i => i.status === '已读' || i.status === '跳过');
+  if (allCompleted) {
+    plan.status = 'completed';
+  }
+  
+  res.json(item);
+});
+
+router.get('/rotation-plans/stats/summary', (req, res) => {
+  const { start, end } = getWeekRange(new Date());
+  
+  let currentPlan = rotationPlans.find(p => 
+    p.weekStartDate === start && p.weekEndDate === end
+  );
+  
+  if (!currentPlan) {
+    currentPlan = rotationPlans
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+  }
+  
+  if (!currentPlan) {
+    res.json({
+      hasPlan: false,
+      completionRate: 0,
+      hitRate: 0,
+      readCount: 0,
+      totalCount: 0,
+      skippedCount: 0,
+      skippedThemes: []
+    });
+    return;
+  }
+  
+  const items = currentPlan.items;
+  const totalCount = items.length;
+  const readCount = items.filter(i => i.status === '已读').length;
+  const skippedCount = items.filter(i => i.status === '跳过').length;
+  const nonSkippedCount = totalCount - skippedCount;
+  
+  const completionRate = totalCount > 0 
+    ? Math.round((readCount / totalCount) * 100) 
+    : 0;
+  
+  const hitRate = nonSkippedCount > 0 
+    ? Math.round((readCount / nonSkippedCount) * 100) 
+    : 0;
+  
+  const skippedThemesMap: { [key: string]: number } = {};
+  items.filter(i => i.status === '跳过').forEach(i => {
+    const theme = i.book.theme;
+    skippedThemesMap[theme] = (skippedThemesMap[theme] || 0) + 1;
+  });
+  
+  const skippedThemes = Object.entries(skippedThemesMap)
+    .map(([theme, count]) => ({ theme: theme as any, count }))
+    .sort((a, b) => b.count - a.count);
+  
+  res.json({
+    hasPlan: true,
+    planId: currentPlan.id,
+    weekStartDate: currentPlan.weekStartDate,
+    weekEndDate: currentPlan.weekEndDate,
+    totalCount,
+    readCount,
+    skippedCount,
+    completionRate,
+    hitRate,
+    skippedThemes
+  });
 });
 
 export default router;

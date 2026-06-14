@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Book, BorrowRecord, ReadingRecord, BabyInfo, BookTheme, InteractionType } from './types';
+import { Book, BorrowRecord, ReadingRecord, BabyInfo, BookTheme, InteractionType, RotationPlan } from './types';
 
 export const babyInfo: BabyInfo = {
   name: '小宝',
@@ -256,3 +256,5 @@ export const themes: BookTheme[] = [
 ];
 
 export const interactionTypes: InteractionType[] = ['翻翻', '触摸', '发声', '普通'];
+
+export let rotationPlans: RotationPlan[] = [];

@@ -95,3 +95,46 @@ export interface RecommendationResponse {
   themePreferences: { theme: string; count: number }[];
   recommendations: Recommendation[];
 }
+
+export type RotationItemStatus = '待读' | '已读' | '跳过' | '重点';
+export type RotationPlanStatus = 'active' | 'completed' | 'expired';
+
+export interface RotationPlanItem {
+  id: string;
+  bookId: string;
+  bookTitle: string;
+  book: Book;
+  sortOrder: number;
+  status: RotationItemStatus;
+  isFocus: boolean;
+  reasons: string[];
+  skipReason?: string;
+  readDate?: string;
+  readingRecordId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RotationPlan {
+  id: string;
+  weekStartDate: string;
+  weekEndDate: string;
+  babyAgeMonths: number;
+  status: RotationPlanStatus;
+  items: RotationPlanItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RotationPlanStats {
+  hasPlan: boolean;
+  planId?: string;
+  weekStartDate?: string;
+  weekEndDate?: string;
+  totalCount: number;
+  readCount: number;
+  skippedCount: number;
+  completionRate: number;
+  hitRate: number;
+  skippedThemes: ThemeStats[];
+}

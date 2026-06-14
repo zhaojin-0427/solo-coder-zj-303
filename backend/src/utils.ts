@@ -1,4 +1,4 @@
-import { BabyInfo, Book, Recommendation } from './types';
+import { BabyInfo, Book, Recommendation, RotationPlanItem, BookTheme } from './types';
 
 export function calculateBabyAgeMonths(birthDate: string): number {
   const birth = new Date(birthDate);
@@ -105,4 +105,140 @@ export function isOverdue(expectedReturnDate: string): boolean {
   const expected = new Date(expectedReturnDate);
   expected.setHours(0, 0, 0, 0);
   return today > expected;
+}
+
+export function getWeekRange(date: Date): { start: string; end: string } {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  const monday = new Date(d.setDate(diff));
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+  return {
+    start: monday.toISOString().split('T')[0],
+    end: sunday.toISOString().split('T')[0]
+  };
+}
+
+export function generateRotationPlanItems(
+  books: Book[],
+  babyAgeMonths: number,
+  readingRecords: { bookId: string; readDate: string }[],
+  weekSize: number = 5
+): Omit<RotationPlanItem, 'id' | 'createdAt' | 'updatedAt'>[] {
+  const now = new Date();
+  const readBookMap = new Map<string, string[]>();
+  for (const record of readingRecords) {
+    if (!readBookMap.has(record.bookId)) {
+      readBookMap.set(record.bookId, []);
+    }
+    readBookMap.get(record.bookId)!.push(record.readDate);
+  }
+
+  const recentReadBookIds = new Set<string>();
+  for (const [bookId, dates] of readBookMap) {
+    const lastRead = dates.sort().reverse()[0];
+    if (lastRead) {
+      const daysSinceLastRead = (now.getTime() - new Date(lastRead).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceLastRead < 14) {
+        recentReadBookIds.add(bookId);
+      }
+    }
+  }
+
+  const availableBooks = books.filter(book => {
+    if (book.status !== '在家') return false;
+    if (recentReadBookIds.has(book.id)) return false;
+    return true;
+  });
+
+  const scoredBooks = availableBooks.map(book => {
+    let score = 0;
+    const reasons: string[] = [];
+
+    if (babyAgeMonths >= book.minMonth && babyAgeMonths <= book.maxMonth) {
+      score += 40;
+      reasons.push('完全适合当前月龄');
+    } else if (babyAgeMonths < book.minMonth) {
+      const diff = book.minMonth - babyAgeMonths;
+      if (diff <= 2) {
+        score += 25;
+        reasons.push('即将适龄，可以提前接触');
+      } else {
+        score += 5;
+      }
+    } else {
+      const diff = babyAgeMonths - book.maxMonth;
+      if (diff <= 6) {
+        score += 20;
+        reasons.push('略微超龄，仍有阅读价值');
+      } else {
+        score += 5;
+      }
+    }
+
+    const readDates = readBookMap.get(book.id) || [];
+    if (readDates.length === 0) {
+      const purchaseDate = new Date(book.purchaseDate);
+      const daysSincePurchase = (now.getTime() - purchaseDate.getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSincePurchase > 60) {
+        score += 25;
+        reasons.push('长期闲置，急需阅读');
+      } else if (daysSincePurchase > 30) {
+        score += 15;
+        reasons.push('购入已久，尚未阅读');
+      } else {
+        score += 10;
+        reasons.push('新书推荐');
+      }
+    } else {
+      const lastRead = readDates.sort().reverse()[0];
+      const daysSinceLastRead = (now.getTime() - new Date(lastRead).getTime()) / (1000 * 60 * 60 * 24);
+      if (daysSinceLastRead > 60) {
+        score += 20;
+        reasons.push('久未阅读，适合重温');
+      } else if (daysSinceLastRead > 30) {
+        score += 12;
+        reasons.push('间隔合适，适合复习');
+      }
+    }
+
+    if (book.interactionType === '翻翻') {
+      score += 10;
+      reasons.push('互动性强的翻翻书');
+    } else if (book.interactionType === '触摸') {
+      score += 8;
+      reasons.push('触感体验丰富');
+    } else if (book.interactionType === '发声') {
+      score += 12;
+      reasons.push('有声书，促进感官发育');
+    }
+
+    return { book, score, reasons };
+  });
+
+  scoredBooks.sort((a, b) => b.score - a.score);
+
+  const selectedItems: Omit<RotationPlanItem, 'id' | 'createdAt' | 'updatedAt'>[] = [];
+  const selectedThemes = new Set<BookTheme>();
+
+  for (const item of scoredBooks) {
+    if (selectedItems.length >= weekSize) break;
+
+    const hasUnselectedTheme = !selectedThemes.has(item.book.theme);
+    if (selectedItems.length < 3 || hasUnselectedTheme || selectedThemes.size >= 3) {
+      selectedThemes.add(item.book.theme);
+      selectedItems.push({
+        bookId: item.book.id,
+        bookTitle: item.book.title,
+        book: item.book,
+        sortOrder: selectedItems.length + 1,
+        status: '待读',
+        isFocus: selectedItems.length === 0,
+        reasons: item.reasons,
+      });
+    }
+  }
+
+  return selectedItems;
 }

@@ -6,7 +6,10 @@ import type {
   BabyInfo,
   Statistics,
   RecommendationResponse,
-  BookStatus
+  BookStatus,
+  RotationPlan,
+  RotationPlanItem,
+  RotationPlanStats
 } from '@/types';
 
 const api = axios.create({
@@ -70,4 +73,21 @@ export const statsApi = {
 export const metaApi = {
   getThemes: () => api.get<string[]>('/themes').then(r => r.data),
   getInteractionTypes: () => api.get<string[]>('/interaction-types').then(r => r.data)
+};
+
+export const rotationApi = {
+  getList: () => api.get<RotationPlan[]>('/rotation-plans').then(r => r.data),
+  getCurrent: () => api.get<RotationPlan>('/rotation-plans/current').then(r => r.data),
+  getDetail: (id: string) => api.get<RotationPlan>(`/rotation-plans/${id}`).then(r => r.data),
+  generate: (weekSize?: number) => 
+    api.post<RotationPlan>('/rotation-plans/generate', { weekSize }).then(r => r.data),
+  setFocus: (planId: string, itemId: string, isFocus: boolean) =>
+    api.patch<RotationPlanItem>(`/rotation-plans/${planId}/items/${itemId}/focus`, { isFocus }).then(r => r.data),
+  skipItem: (planId: string, itemId: string, skipReason: string) =>
+    api.patch<RotationPlanItem>(`/rotation-plans/${planId}/items/${itemId}/skip`, { skipReason }).then(r => r.data),
+  unskipItem: (planId: string, itemId: string) =>
+    api.patch<RotationPlanItem>(`/rotation-plans/${planId}/items/${itemId}/unskip`).then(r => r.data),
+  updateItemStatus: (planId: string, itemId: string, status: string, readingRecordId?: string, readDate?: string) =>
+    api.patch<RotationPlanItem>(`/rotation-plans/${planId}/items/${itemId}/status`, { status, readingRecordId, readDate }).then(r => r.data),
+  getStats: () => api.get<RotationPlanStats>('/rotation-plans/stats/summary').then(r => r.data)
 };

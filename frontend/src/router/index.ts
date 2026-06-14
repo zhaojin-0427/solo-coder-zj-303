@@ -18,6 +18,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '借阅记录' }
   },
   {
+    path: '/rotation',
+    name: 'Rotation',
+    component: () => import('@/views/RotationPlan.vue'),
+    meta: { title: '轮换计划' }
+  },
+  {
     path: '/recommend',
     name: 'Recommend',
     component: () => import('@/views/Recommend.vue'),

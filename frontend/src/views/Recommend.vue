@@ -1,23 +1,26 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { recommendApi, babyApi } from '@/api'
-import type { Recommendation, BabyInfo } from '@/types'
+import { recommendApi, babyApi, rotationApi } from '@/api'
+import type { Recommendation, BabyInfo, RotationPlanStats } from '@/types'
 
 const recommendations = ref<Recommendation[]>([])
 const babyInfo = ref<BabyInfo | null>(null)
 const themePreferences = ref<{ theme: string; count: number }[]>([])
+const rotationStats = ref<RotationPlanStats | null>(null)
 const loading = ref(false)
 
 const loadData = async () => {
   loading.value = true
   try {
-    const [info, rec] = await Promise.all([
+    const [info, rec, stats] = await Promise.all([
       babyApi.getInfo(),
-      recommendApi.getRecommendations()
+      recommendApi.getRecommendations(),
+      rotationApi.getStats().catch(() => null)
     ])
     babyInfo.value = info
     recommendations.value = rec.recommendations
     themePreferences.value = rec.themePreferences
+    rotationStats.value = stats
   } catch (e) {
     console.error('加载推荐数据失败', e)
   } finally {
@@ -49,6 +52,30 @@ onMounted(() => {
       <button class="btn btn-outline" @click="loadData">
         🔄 刷新推荐
       </button>
+    </div>
+
+    <div v-if="rotationStats && rotationStats.hasPlan" class="rotation-stats-card">
+      <div class="rotation-stats-header">
+        <span class="rotation-icon">📅</span>
+        <span class="rotation-title">本周轮换计划</span>
+      </div>
+      <div class="rotation-stats-content">
+        <div class="rotation-stat-item">
+          <div class="rotation-stat-value">{{ rotationStats.completionRate }}%</div>
+          <div class="rotation-stat-label">完成率</div>
+        </div>
+        <div class="rotation-stat-item highlight">
+          <div class="rotation-stat-value">{{ rotationStats.hitRate }}%</div>
+          <div class="rotation-stat-label">计划命中率</div>
+        </div>
+        <div class="rotation-stat-item">
+          <div class="rotation-stat-value">{{ rotationStats.readCount }}/{{ rotationStats.totalCount }}</div>
+          <div class="rotation-stat-label">已读/总计</div>
+        </div>
+        <router-link to="/rotation" class="go-rotation-link">
+          查看计划 →
+        </router-link>
+      </div>
     </div>
 
     <div v-if="babyInfo" class="baby-info-card">
@@ -136,6 +163,71 @@ onMounted(() => {
 .recommend-page {
   max-width: 900px;
   margin: 0 auto;
+}
+
+.rotation-stats-card {
+  background: white;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border-left: 4px solid #667eea;
+}
+
+.rotation-stats-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.rotation-icon {
+  font-size: 20px;
+}
+
+.rotation-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+}
+
+.rotation-stats-content {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.rotation-stat-item {
+  text-align: center;
+}
+
+.rotation-stat-value {
+  font-size: 20px;
+  font-weight: 700;
+  color: #333;
+  margin-bottom: 2px;
+}
+
+.rotation-stat-item.highlight .rotation-stat-value {
+  color: #52c41a;
+}
+
+.rotation-stat-label {
+  font-size: 12px;
+  color: #999;
+}
+
+.go-rotation-link {
+  margin-left: auto;
+  font-size: 13px;
+  color: #667eea;
+  font-weight: 500;
+}
+
+.go-rotation-link:hover {
+  color: #764ba2;
+  text-decoration: underline;
 }
 
 .page-header {

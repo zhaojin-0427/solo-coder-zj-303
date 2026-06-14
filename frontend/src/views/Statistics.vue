@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { statsApi } from '@/api'
-import type { Statistics } from '@/types'
+import { statsApi, rotationApi } from '@/api'
+import type { Statistics, RotationPlanStats } from '@/types'
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { BarChart, PieChart, LineChart } from 'echarts/charts'
@@ -25,12 +25,18 @@ use([
 ])
 
 const stats = ref<Statistics | null>(null)
+const rotationStats = ref<RotationPlanStats | null>(null)
 const loading = ref(false)
 
 const loadStats = async () => {
   loading.value = true
   try {
-    stats.value = await statsApi.getStatistics()
+    const [s, rs] = await Promise.all([
+      statsApi.getStatistics(),
+      rotationApi.getStats().catch(() => null)
+    ])
+    stats.value = s
+    rotationStats.value = rs
   } catch (e) {
     console.error('加载统计数据失败', e)
   } finally {
@@ -159,6 +165,53 @@ const returnRateChartOption = computed(() => {
   }
 })
 
+const skippedThemesChartOption = computed(() => {
+  if (!rotationStats.value || !rotationStats.value.skippedThemes || rotationStats.value.skippedThemes.length === 0) return {}
+  const data = rotationStats.value.skippedThemes
+  const colors = ['#ff4d4f', '#ff7a45', '#ffa940', '#ffc53d', '#ffec3d', '#95de64', '#5cdbd3', '#40a9ff', '#597ef7', '#9254de']
+  return {
+    title: {
+      text: '被跳过主题分布',
+      left: 'center',
+      textStyle: { fontSize: 14, fontWeight: 600 }
+    },
+    tooltip: {
+      trigger: 'item',
+      formatter: '{b}: {c}本 ({d}%)'
+    },
+    legend: {
+      orient: 'vertical',
+      right: 10,
+      top: 'center',
+      textStyle: { fontSize: 12 }
+    },
+    series: [{
+      type: 'pie',
+      radius: ['40%', '70%'],
+      center: ['40%', '55%'],
+      avoidLabelOverlap: false,
+      itemStyle: {
+        borderRadius: 6,
+        borderColor: '#fff',
+        borderWidth: 2
+      },
+      label: { show: false },
+      emphasis: {
+        label: {
+          show: true,
+          fontSize: 14,
+          fontWeight: 'bold'
+        }
+      },
+      data: data.map((d, i) => ({
+        value: d.count,
+        name: d.theme,
+        itemStyle: { color: colors[i % colors.length] }
+      }))
+    }]
+  }
+})
+
 onMounted(() => {
   loadStats()
 })
@@ -171,6 +224,37 @@ onMounted(() => {
       <button class="btn btn-outline" @click="loadStats">
         🔄 刷新数据
       </button>
+    </div>
+
+    <div v-if="rotationStats && rotationStats.hasPlan" class="rotation-stats-cards">
+      <div class="rotation-stat-card primary">
+        <div class="stat-icon">📅</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ rotationStats.completionRate }}%</div>
+          <div class="stat-label">本周完成率</div>
+        </div>
+      </div>
+      <div class="rotation-stat-card success">
+        <div class="stat-icon">🎯</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ rotationStats.hitRate }}%</div>
+          <div class="stat-label">计划命中率</div>
+        </div>
+      </div>
+      <div class="rotation-stat-card warning">
+        <div class="stat-icon">⏭️</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ rotationStats.skippedCount }}</div>
+          <div class="stat-label">已跳过绘本</div>
+        </div>
+      </div>
+      <div class="rotation-stat-card info">
+        <div class="stat-icon">✅</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ rotationStats.readCount }}/{{ rotationStats.totalCount }}</div>
+          <div class="stat-label">已读/计划总数</div>
+        </div>
+      </div>
     </div>
 
     <div class="stats-cards">
@@ -216,6 +300,21 @@ onMounted(() => {
       <div class="chart-card">
         <v-chart :option="returnRateChartOption" style="height: 300px;" autoresize />
       </div>
+      <div 
+        v-if="rotationStats && rotationStats.skippedThemes && rotationStats.skippedThemes.length > 0" 
+        class="chart-card"
+      >
+        <v-chart :option="skippedThemesChartOption" style="height: 300px;" autoresize />
+      </div>
+      <div 
+        v-else-if="rotationStats && rotationStats.hasPlan" 
+        class="chart-card no-skipped-card"
+      >
+        <div class="no-skipped-content">
+          <span class="happy-icon">😊</span>
+          <p>太棒了！本周没有跳过任何绘本</p>
+        </div>
+      </div>
       <div class="chart-card idle-books-card">
         <h3 class="card-title">⚠️ 长期闲置绘本提醒</h3>
         <div v-if="stats?.idleBooks && stats.idleBooks.length > 0" class="idle-list">
@@ -247,6 +346,46 @@ onMounted(() => {
 .stats-page {
   max-width: 1200px;
   margin: 0 auto;
+}
+
+.rotation-stats-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.rotation-stat-card {
+  background: white;
+  padding: 20px;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  border-left: 4px solid #d9d9d9;
+}
+
+.rotation-stat-card.primary { border-left-color: #667eea; }
+.rotation-stat-card.success { border-left-color: #52c41a; }
+.rotation-stat-card.warning { border-left-color: #faad14; }
+.rotation-stat-card.info { border-left-color: #1890ff; }
+
+.no-skipped-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.no-skipped-content {
+  text-align: center;
+  color: #999;
+}
+
+.no-skipped-content .happy-icon {
+  font-size: 48px;
+  margin-bottom: 12px;
+  display: block;
 }
 
 .page-header {
@@ -424,6 +563,7 @@ onMounted(() => {
 }
 
 @media (max-width: 900px) {
+  .rotation-stats-cards,
   .stats-cards {
     grid-template-columns: repeat(2, 1fr);
   }

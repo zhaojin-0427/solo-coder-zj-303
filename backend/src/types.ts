@@ -88,3 +88,46 @@ export interface Statistics {
   idleBooks: Book[];
   borrowedBooksCount: number;
 }
+
+export type RotationItemStatus = '待读' | '已读' | '跳过' | '重点';
+export type RotationPlanStatus = 'active' | 'completed' | 'expired';
+
+export interface RotationPlanItem {
+  id: string;
+  bookId: string;
+  bookTitle: string;
+  book: Book;
+  sortOrder: number;
+  status: RotationItemStatus;
+  isFocus: boolean;
+  reasons: string[];
+  skipReason?: string;
+  readDate?: string;
+  readingRecordId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RotationPlan {
+  id: string;
+  weekStartDate: string;
+  weekEndDate: string;
+  babyAgeMonths: number;
+  status: RotationPlanStatus;
+  items: RotationPlanItem[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RotationPlanStats {
+  planId: string;
+  weekStartDate: string;
+  weekEndDate: string;
+  totalBooks: number;
+  readCount: number;
+  skippedCount: number;
+  focusCount: number;
+  completionRate: number;
+  hitRate: number;
+  skippedThemes: ThemeStats[];
+}
