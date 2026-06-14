@@ -3,9 +3,20 @@ import { BabyInfo, Book, Recommendation } from './types';
 export function calculateBabyAgeMonths(birthDate: string): number {
   const birth = new Date(birthDate);
   const now = new Date();
-  const years = now.getFullYear() - birth.getFullYear();
-  const months = now.getMonth() - birth.getMonth();
-  return years * 12 + months;
+  
+  let years = now.getFullYear() - birth.getFullYear();
+  let months = now.getMonth() - birth.getMonth();
+  const days = now.getDate() - birth.getDate();
+  
+  if (days < 0) {
+    months -= 1;
+  }
+  if (months < 0) {
+    years -= 1;
+    months += 12;
+  }
+  
+  return Math.max(0, years * 12 + months);
 }
 
 export function getBabyInfo(): BabyInfo {

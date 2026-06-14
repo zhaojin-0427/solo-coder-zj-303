@@ -72,6 +72,10 @@ const openEditModal = (book: Book) => {
 }
 
 const saveBook = async () => {
+  if (!editingBook.value.title || !String(editingBook.value.title).trim()) {
+    alert('绘本名称不能为空')
+    return
+  }
   try {
     if (isEdit.value && editingBook.value.id) {
       await bookApi.update(editingBook.value.id, editingBook.value)
@@ -80,7 +84,8 @@ const saveBook = async () => {
     }
     showModal.value = false
     loadBooks()
-  } catch (e) {
+  } catch (e: any) {
+    alert(e.response?.data?.error || '保存绘本失败')
     console.error('保存绘本失败', e)
   }
 }

@@ -52,10 +52,16 @@ router.get('/books/:id', (req, res) => {
 });
 
 router.post('/books', (req, res) => {
+  const { title } = req.body;
+  if (!title || !String(title).trim()) {
+    res.status(400).json({ error: '绘本名称不能为空' });
+    return;
+  }
   const now = new Date().toISOString();
   const newBook: Book = {
     id: uuidv4(),
     ...req.body,
+    title: String(title).trim(),
     status: req.body.status || '在家',
     createdAt: now,
     updatedAt: now
@@ -68,6 +74,10 @@ router.put('/books/:id', (req, res) => {
   const index = books.findIndex(b => b.id === req.params.id);
   if (index === -1) {
     res.status(404).json({ error: '绘本不存在' });
+    return;
+  }
+  if (req.body.title !== undefined && !String(req.body.title).trim()) {
+    res.status(400).json({ error: '绘本名称不能为空' });
     return;
   }
   books[index] = {
@@ -203,12 +213,14 @@ router.post('/reading-records', (req, res) => {
     return;
   }
   
+  const durationNum = Math.max(0, Number(duration) || 0);
+  
   const newRecord: ReadingRecord = {
     id: uuidv4(),
     bookId,
     bookTitle: book.title,
     readDate: readDate || new Date().toISOString().split('T')[0],
-    duration: Number(duration) || 0,
+    duration: durationNum,
     babyAgeMonths: Number(babyAgeMonths) || calculateBabyAgeMonths(babyInfo.birthDate),
     reaction,
     notes,
@@ -262,7 +274,7 @@ router.get('/statistics', (req, res) => {
   const closedBorrows = borrowRecords.filter(b => b.status !== '借出中').length;
   const returnRate = closedBorrows > 0 ? Math.round((returnedCount / closedBorrows) * 100) : 0;
   
-  const totalReadingTime = readingRecords.reduce((sum, r) => sum + r.duration, 0);
+  const totalReadingTime = readingRecords.reduce((sum, r) => sum + Math.max(0, r.duration), 0);
   
   const monthlyReadingFrequency: { month: number; count: number }[] = [];
   const monthMap: { [key: number]: number } = {};

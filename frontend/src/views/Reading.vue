@@ -52,9 +52,14 @@ const submitRecord = async () => {
     alert('请选择绘本')
     return
   }
+  if (!newRecord.value.duration || newRecord.value.duration <= 0) {
+    alert('阅读时长必须大于0')
+    return
+  }
   try {
     await readingApi.create({
       ...newRecord.value,
+      duration: Math.max(0, Number(newRecord.value.duration) || 0),
       babyAgeMonths: babyInfo.value?.ageMonths
     })
     showModal.value = false
