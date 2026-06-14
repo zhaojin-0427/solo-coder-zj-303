@@ -114,7 +114,9 @@ router.get('/borrow-records', (req, res) => {
   }
   
   for (const record of filtered) {
-    if (record.status === '借出中' && isOverdue(record.expectedReturnDate)) {
+    if (record.actualReturnDate) {
+      record.status = '已归还';
+    } else if (record.status === '借出中' && isOverdue(record.expectedReturnDate)) {
       record.status = '逾期';
     }
   }

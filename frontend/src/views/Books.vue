@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { bookApi, metaApi } from '@/api'
 import type { Book, BookStatus, InteractionType, BookTheme } from '@/types'
+import { getLocalDateString } from '@/utils/date'
 
 const books = ref<Book[]>([])
 const themes = ref<BookTheme[]>([])
@@ -57,7 +58,7 @@ const openAddModal = () => {
     minMonth: 6,
     maxMonth: 24,
     interactionType: '普通',
-    purchaseDate: new Date().toISOString().split('T')[0],
+    purchaseDate: getLocalDateString(),
     status: '在家',
     description: ''
   }

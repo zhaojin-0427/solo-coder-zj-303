@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { readingApi, bookApi, babyApi } from '@/api'
 import type { ReadingRecord, Book, BabyInfo } from '@/types'
+import { getLocalDateString } from '@/utils/date'
 
 const records = ref<ReadingRecord[]>([])
 const books = ref<Book[]>([])
@@ -11,7 +12,7 @@ const loading = ref(false)
 const showModal = ref(false)
 const newRecord = ref({
   bookId: '',
-  readDate: new Date().toISOString().split('T')[0],
+  readDate: getLocalDateString(),
   duration: 15,
   reaction: '',
   notes: ''
@@ -38,7 +39,7 @@ const loadData = async () => {
 const openAddModal = () => {
   newRecord.value = {
     bookId: books.value[0]?.id || '',
-    readDate: new Date().toISOString().split('T')[0],
+    readDate: getLocalDateString(),
     duration: 15,
     reaction: '',
     notes: ''
@@ -97,8 +98,15 @@ const calculateStreak = () => {
   let streak = 0
   let today = new Date()
   
+  const getDateStr = (d: Date) => {
+    const year = d.getFullYear()
+    const month = String(d.getMonth() + 1).padStart(2, '0')
+    const day = String(d.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+  
   for (let i = 0; i < 365; i++) {
-    const dateStr = today.toISOString().split('T')[0]
+    const dateStr = getDateStr(today)
     if (dates.has(dateStr)) {
       streak++
       today.setDate(today.getDate() - 1)

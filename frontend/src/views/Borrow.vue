@@ -2,6 +2,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { borrowApi, bookApi } from '@/api'
 import type { BorrowRecord, Book } from '@/types'
+import { getLocalDateString } from '@/utils/date'
 
 const records = ref<BorrowRecord[]>([])
 const books = ref<Book[]>([])
@@ -13,7 +14,7 @@ const newBorrow = ref({
   bookId: '',
   borrower: '',
   borrowerPhone: '',
-  borrowDate: new Date().toISOString().split('T')[0],
+  borrowDate: getLocalDateString(),
   expectedReturnDate: '',
   notes: ''
 })
@@ -51,7 +52,7 @@ const openAddModal = () => {
     bookId: '',
     borrower: '',
     borrowerPhone: '',
-    borrowDate: new Date().toISOString().split('T')[0],
+    borrowDate: getLocalDateString(),
     expectedReturnDate: '',
     notes: ''
   }
