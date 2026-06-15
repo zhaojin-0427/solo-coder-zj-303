@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { borrowApi, bookApi } from '@/api'
-import type { BorrowRecord, Book } from '@/types'
+import { borrowApi, bookApi, careApi } from '@/api'
+import type { BorrowRecord, Book, BookCareProfile } from '@/types'
 import { getLocalDateString } from '@/utils/date'
 
 const records = ref<BorrowRecord[]>([])
 const books = ref<Book[]>([])
+const careProfiles = ref<BookCareProfile[]>([])
 const loading = ref(false)
 
 const filterStatus = ref<string>('')
@@ -47,6 +48,14 @@ const loadBooks = async () => {
   }
 }
 
+const loadCareProfiles = async () => {
+  try {
+    careProfiles.value = await careApi.getProfiles()
+  } catch (e) {
+    console.error('加载养护档案失败', e)
+  }
+}
+
 const openAddModal = () => {
   newBorrow.value = {
     bookId: '',
@@ -64,11 +73,16 @@ const submitBorrow = async () => {
     alert('请填写完整信息')
     return
   }
+  if (isBookBlocked(newBorrow.value.bookId)) {
+    alert('该绘本已暂停流转或风险极高，暂不可借')
+    return
+  }
   try {
     await borrowApi.create(newBorrow.value)
     showModal.value = false
     loadRecords()
     loadBooks()
+    loadCareProfiles()
   } catch (e: any) {
     alert(e.response?.data?.error || '借出失败')
   }
@@ -116,9 +130,16 @@ const getDaysRemaining = (expectedReturnDate: string) => {
   return diff
 }
 
+const isBookBlocked = (bookId: string): boolean => {
+  const profile = careProfiles.value.find(p => p.bookId === bookId)
+  if (!profile) return false
+  return profile.isCirculationPaused || profile.damageRiskLevel === '极高'
+}
+
 onMounted(() => {
   loadRecords()
   loadBooks()
+  loadCareProfiles()
 })
 </script>
 
@@ -166,7 +187,10 @@ onMounted(() => {
         <div class="record-main">
           <div class="book-icon">📚</div>
           <div class="record-info">
-            <h3 class="book-title">{{ record.bookTitle }}</h3>
+            <div class="book-title-row">
+              <h3 class="book-title">{{ record.bookTitle }}</h3>
+              <span v-if="isBookBlocked(record.bookId)" class="blocked-badge">🚫 暂停流转/极高风险</span>
+            </div>
             <div class="record-meta">
               <span class="borrower">👤 {{ record.borrower }}</span>
               <span class="phone" v-if="record.borrowerPhone">📞 {{ record.borrowerPhone }}</span>
@@ -223,7 +247,7 @@ onMounted(() => {
             <select v-model="newBorrow.bookId">
               <option value="">请选择绘本</option>
               <option v-for="book in books" :key="book.id" :value="book.id">
-                {{ book.title }} ({{ book.theme }})
+                {{ book.title }} ({{ book.theme }}){{ isBookBlocked(book.id) ? '（暂停流转/极高风险，暂不可借）' : '' }}
               </option>
             </select>
             <p v-if="books.length === 0" class="form-hint">暂无在家的绘本</p>
@@ -411,11 +435,28 @@ onMounted(() => {
   min-width: 0;
 }
 
+.book-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
 .book-title {
   font-size: 16px;
   font-weight: 600;
   color: #333;
-  margin-bottom: 8px;
+  margin: 0;
+}
+
+.blocked-badge {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #fff1f0;
+  color: #ff4d4f;
+  font-weight: 500;
 }
 
 .record-meta {

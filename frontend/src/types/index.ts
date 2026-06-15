@@ -287,3 +287,104 @@ export interface AssessmentOverview {
   pendingInterventions: number;
   dimensions?: AssessmentDimensionScore[];
 }
+
+export type BookCondition = '全新' | '良好' | '一般' | '较差' | '破损';
+export type DamageType = '污渍' | '缺页' | '发声失灵' | '撕页' | '涂鸦' | '装订松散' | '书脊损坏' | '封面磨损' | '其他';
+export type DamageRiskLevel = '低' | '中' | '高' | '极高';
+export type CareReminderType = '清洁消毒' | '损耗复查' | '维修跟进';
+export type RepairStatus = '待处理' | '处理中' | '已完成' | '无法修复';
+
+export interface DamageRecord {
+  id: string;
+  bookId: string;
+  bookTitle: string;
+  damageType: DamageType;
+  severity: '轻微' | '中度' | '严重';
+  description: string;
+  location?: string;
+  discoveredDate: string;
+  discoveredBy?: string;
+  relatedBorrowRecordId?: string;
+  photos?: string[];
+  resolved: boolean;
+  resolvedAt?: string;
+  resolutionNote?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RepairRecord {
+  id: string;
+  bookId: string;
+  bookTitle: string;
+  damageRecordId?: string;
+  repairType: string;
+  description: string;
+  repairDate: string;
+  repairedBy?: string;
+  cost?: number;
+  status: RepairStatus;
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CareReminder {
+  id: string;
+  bookId: string;
+  bookTitle: string;
+  type: CareReminderType;
+  title: string;
+  description?: string;
+  scheduledDate: string;
+  isCompleted: boolean;
+  completedAt?: string;
+  priority: 'low' | 'medium' | 'high';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BookCareProfile {
+  id: string;
+  bookId: string;
+  bookTitle: string;
+  currentCondition: BookCondition;
+  conditionDescription?: string;
+  lastCleanDate?: string;
+  lastInspectionDate?: string;
+  totalBorrowCount: number;
+  totalReadCount: number;
+  damageRiskLevel: DamageRiskLevel;
+  damageRiskReasons: string[];
+  isCirculationPaused: boolean;
+  pauseReason?: string;
+  expectedResumeDate?: string;
+  damageRecords: DamageRecord[];
+  repairRecords: RepairRecord[];
+  reminders: CareReminder[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CareStats {
+  totalProfiles: number;
+  highRiskCount: number;
+  pausedCount: number;
+  pendingDamagesCount: number;
+  pendingRepairsCount: number;
+  pendingCleaningCount: number;
+  overdueRemindersCount: number;
+  conditionDistribution: { condition: BookCondition; count: number }[];
+  riskDistribution: { risk: DamageRiskLevel; count: number }[];
+  damageTypeDistribution: { type: DamageType; count: number }[];
+  themeDamageDistribution: { theme: BookTheme; count: number }[];
+}
+
+export interface CareMeta {
+  bookConditions: BookCondition[];
+  damageTypes: DamageType[];
+  damageRiskLevels: DamageRiskLevel[];
+  repairStatuses: RepairStatus[];
+  reminderTypes: CareReminderType[];
+  severities: ('轻微' | '中度' | '严重')[];
+}

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { bookApi, metaApi, sharingApi } from '@/api'
-import type { Book, BookStatus, InteractionType, BookTheme, SharedBook } from '@/types'
+import { bookApi, metaApi, sharingApi, careApi } from '@/api'
+import type { Book, BookStatus, InteractionType, BookTheme, SharedBook, BookCareProfile, DamageRiskLevel, BookCondition } from '@/types'
 import { getLocalDateString } from '@/utils/date'
 
 const router = useRouter()
@@ -26,6 +26,40 @@ const statusColors: Record<BookStatus, string> = {
   '借出': '#faad14',
   '预留': '#1890ff',
   '转送': '#8c8c8c'
+}
+
+const careProfiles = ref<BookCareProfile[]>([])
+
+const riskColors: Record<DamageRiskLevel, string> = {
+  '低': '#52c41a',
+  '中': '#faad14',
+  '高': '#fa541c',
+  '极高': '#f5222d'
+}
+
+const conditionColors: Record<BookCondition, string> = {
+  '全新': '#52c41a',
+  '良好': '#1890ff',
+  '一般': '#faad14',
+  '较差': '#fa541c',
+  '破损': '#f5222d'
+}
+
+const getCareProfile = (bookId: string) => {
+  return careProfiles.value.find(p => p.bookId === bookId)
+}
+
+const loadCareProfiles = async () => {
+  try {
+    careProfiles.value = await careApi.getProfiles()
+  } catch (e) {
+    console.error('加载养护档案失败', e)
+  }
+}
+
+const isCareRestricted = (bookId: string) => {
+  const profile = getCareProfile(bookId)
+  return !!(profile && (profile.isCirculationPaused || profile.damageRiskLevel === '极高'))
 }
 
 const loadBooks = async () => {
@@ -139,6 +173,7 @@ const stats = computed(() => {
 onMounted(() => {
   loadMeta().then(() => loadBooks())
   loadMySharedBooks()
+  loadCareProfiles()
 })
 </script>
 
@@ -196,7 +231,7 @@ onMounted(() => {
     <div v-if="loading" class="loading">加载中...</div>
 
     <div v-else class="book-grid">
-      <div v-for="book in books" :key="book.id" class="book-card">
+      <div v-for="book in books" :key="book.id" class="book-card" :class="{ 'care-highlight': getCareProfile(book.id) && (['高', '极高'].includes(getCareProfile(book.id)!.damageRiskLevel) || getCareProfile(book.id)!.isCirculationPaused) }">
         <div class="book-cover">
           <span class="book-emoji">📖</span>
         </div>
@@ -209,6 +244,15 @@ onMounted(() => {
             <span class="tag interact-tag">{{ book.interactionType }}</span>
             <span v-if="isBookShared(book.id)" class="tag sharing-tag" :title="'共享状态：' + (getSharedBookInfo(book.id)?.borrowStatus)">
               🔄 已共享 · {{ getSharedBookInfo(book.id)?.borrowStatus }}
+            </span>
+          </div>
+          <div v-if="getCareProfile(book.id)" class="care-tags">
+            <span v-if="getCareProfile(book.id)!.isCirculationPaused" class="tag care-paused-tag">🚫 暂停流转</span>
+            <span class="tag care-risk-tag" :style="{ backgroundColor: riskColors[getCareProfile(book.id)!.damageRiskLevel] + '20', color: riskColors[getCareProfile(book.id)!.damageRiskLevel] }">
+              风险：{{ getCareProfile(book.id)!.damageRiskLevel }}
+            </span>
+            <span class="tag care-condition-tag" :style="{ backgroundColor: conditionColors[getCareProfile(book.id)!.currentCondition] + '20', color: conditionColors[getCareProfile(book.id)!.currentCondition] }">
+              品相：{{ getCareProfile(book.id)!.currentCondition }}
             </span>
           </div>
           <div class="book-status">
@@ -225,13 +269,15 @@ onMounted(() => {
           <div class="action-dropdown">
             <button class="action-btn">⚙️</button>
             <div class="dropdown-menu">
-              <button v-if="book.status === '在家'" @click="updateStatus(book, '借出')">标记借出</button>
+              <button v-if="book.status === '在家'" :disabled="isCareRestricted(book.id)" :class="{ disabled: isCareRestricted(book.id) }" @click="isCareRestricted(book.id) ? alert('该绘本已暂停流转或风险等级极高，暂不可操作') : updateStatus(book, '借出')">标记借出</button>
               <button v-if="book.status === '借出'" @click="updateStatus(book, '在家')">标记归还</button>
-              <button v-if="book.status === '在家'" @click="updateStatus(book, '预留')">标记预留</button>
+              <button v-if="book.status === '在家'" :disabled="isCareRestricted(book.id)" :class="{ disabled: isCareRestricted(book.id) }" @click="isCareRestricted(book.id) ? alert('该绘本已暂停流转或风险等级极高，暂不可操作') : updateStatus(book, '预留')">标记预留</button>
               <button v-if="book.status === '在家'" @click="updateStatus(book, '转送')">标记转送</button>
               <button class="divider" disabled></button>
-              <button v-if="book.status === '在家' && !isBookShared(book.id)" @click="router.push('/sharing')">加入共享书单</button>
+              <button v-if="book.status === '在家' && !isBookShared(book.id)" :disabled="isCareRestricted(book.id)" :class="{ disabled: isCareRestricted(book.id) }" @click="isCareRestricted(book.id) ? alert('该绘本已暂停流转或风险等级极高，暂不可操作') : router.push('/sharing')">加入共享书单</button>
               <button v-if="isBookShared(book.id)" @click="router.push('/sharing')">管理共享 / 查看邀约</button>
+              <button class="divider" disabled></button>
+              <button @click="router.push('/care')">查看养护档案</button>
               <button class="divider" disabled></button>
               <button class="danger" @click="deleteBook(book.id)">删除</button>
             </div>
@@ -464,6 +510,10 @@ onMounted(() => {
   position: relative;
 }
 
+.book-card.care-highlight {
+  border: 2px solid rgba(245, 34, 45, 0.5);
+}
+
 .book-card:hover {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
   transform: translateY(-2px);
@@ -539,6 +589,24 @@ onMounted(() => {
   font-weight: 500;
 }
 
+.care-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.care-paused-tag {
+  background: rgba(245, 34, 45, 0.15);
+  color: #f5222d;
+  font-weight: 600;
+}
+
+.care-risk-tag,
+.care-condition-tag {
+  font-weight: 500;
+}
+
 .status-badge {
   font-size: 11px;
   padding: 3px 8px;
@@ -606,6 +674,15 @@ onMounted(() => {
 
 .dropdown-menu button.danger {
   color: #ff4d4f;
+}
+
+.dropdown-menu button.disabled {
+  color: #bfbfbf;
+  cursor: not-allowed;
+}
+
+.dropdown-menu button.disabled:hover {
+  background: transparent;
 }
 
 .dropdown-menu button.divider {

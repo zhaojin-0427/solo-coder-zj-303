@@ -1,4 +1,4 @@
-import { BabyInfo, Book, Recommendation, RotationPlanItem, BookTheme, AssessmentDimensionScore, AssessmentAlert, InterventionSuggestion, AssessmentSnapshot, InteractionType } from './types';
+import { BabyInfo, Book, Recommendation, RotationPlanItem, BookTheme, AssessmentDimensionScore, AssessmentAlert, InterventionSuggestion, AssessmentSnapshot, InteractionType, BookCareProfile, DamageRecord, DamageRiskLevel, BookCondition, CareReminder } from './types';
 
 export function calculateBabyAgeMonths(birthDate: string): number {
   const birth = new Date(birthDate);
@@ -127,7 +127,8 @@ export function generateRotationPlanItems(
   books: Book[],
   babyAgeMonths: number,
   readingRecords: { bookId: string; readDate: string }[],
-  weekSize: number = 5
+  weekSize: number = 5,
+  careProfiles?: BookCareProfile[]
 ): Omit<RotationPlanItem, 'id' | 'createdAt' | 'updatedAt'>[] {
   const now = new Date();
   const readBookMap = new Map<string, string[]>();
@@ -152,6 +153,13 @@ export function generateRotationPlanItems(
   const availableBooks = books.filter(book => {
     if (book.status !== '在家') return false;
     if (recentReadBookIds.has(book.id)) return false;
+    if (careProfiles) {
+      const profile = careProfiles.find(p => p.bookId === book.id);
+      if (profile) {
+        if (profile.isCirculationPaused) return false;
+        if (profile.damageRiskLevel === '极高') return false;
+      }
+    }
     return true;
   });
 
@@ -759,4 +767,190 @@ export function getPeriodRange(type: 'week' | 'month', refDate?: Date): { start:
     start: formatDate(start),
     end: formatDate(end)
   };
+}
+
+export function calculateDamageRiskLevel(
+  book: Book,
+  borrowCount: number,
+  readCount: number,
+  unresolvedDamages: DamageRecord[],
+  isCirculationPaused: boolean
+): { level: DamageRiskLevel; reasons: string[] } {
+  let score = 0;
+  const reasons: string[] = [];
+
+  if (book.interactionType === '翻翻') {
+    score += 15;
+    reasons.push('翻翻书机械结构易损耗');
+  }
+  if (book.interactionType === '发声') {
+    score += 25;
+    reasons.push('发声书电子元件易损坏');
+  }
+  if (book.interactionType === '触摸') {
+    score += 10;
+    reasons.push('触摸书接触面易磨损');
+  }
+
+  if (borrowCount >= 5) {
+    score += 30;
+    reasons.push(`借阅${borrowCount}次，流转频次高`);
+  } else if (borrowCount >= 3) {
+    score += 20;
+    reasons.push(`借阅${borrowCount}次，流转频次较高`);
+  } else if (borrowCount >= 1) {
+    score += 10;
+  }
+
+  if (readCount >= 10) {
+    score += 25;
+    reasons.push(`被阅读${readCount}次，使用频率高`);
+  } else if (readCount >= 5) {
+    score += 15;
+    reasons.push(`被阅读${readCount}次，使用频率较高`);
+  }
+
+  for (const dmg of unresolvedDamages) {
+    if (dmg.severity === '严重') {
+      score += 40;
+      reasons.push(`存在严重损耗：${dmg.damageType}`);
+    } else if (dmg.severity === '中度') {
+      score += 25;
+      reasons.push(`存在中度损耗：${dmg.damageType}`);
+    } else {
+      score += 10;
+      reasons.push(`存在轻微损耗：${dmg.damageType}`);
+    }
+  }
+
+  if (isCirculationPaused) {
+    score += 50;
+    reasons.push('已暂停流转');
+  }
+
+  let level: DamageRiskLevel;
+  if (score >= 80) level = '极高';
+  else if (score >= 50) level = '高';
+  else if (score >= 25) level = '中';
+  else level = '低';
+
+  if (reasons.length === 0) {
+    reasons.push('状态良好，风险较低');
+  }
+
+  return { level, reasons };
+}
+
+export function calculateBookCondition(
+  unresolvedDamages: DamageRecord[],
+  borrowCount: number,
+  readCount: number
+): BookCondition {
+  const severeCount = unresolvedDamages.filter(d => d.severity === '严重').length;
+  const moderateCount = unresolvedDamages.filter(d => d.severity === '中度').length;
+  const mildCount = unresolvedDamages.filter(d => d.severity === '轻微').length;
+
+  if (severeCount >= 2) return '破损';
+  if (severeCount >= 1) return '较差';
+  if (moderateCount >= 2) return '较差';
+  if (moderateCount >= 1 || mildCount >= 2) return '一般';
+  if (mildCount >= 1 || borrowCount >= 3 || readCount >= 8) return '良好';
+  return '全新';
+}
+
+export function updateCareProfileOnAction(
+  profile: BookCareProfile,
+  book: Book,
+  action: 'borrow' | 'return' | 'exchangeComplete' | 'reading'
+): BookCareProfile {
+  const now = new Date().toISOString();
+
+  switch (action) {
+    case 'borrow':
+      profile.totalBorrowCount += 1;
+      break;
+    case 'return':
+    case 'exchangeComplete':
+      profile.totalBorrowCount = Math.max(0, profile.totalBorrowCount);
+      profile.lastInspectionDate = now.split('T')[0];
+      break;
+    case 'reading':
+      profile.totalReadCount += 1;
+      break;
+  }
+
+  const unresolvedDamages = profile.damageRecords.filter(d => !d.resolved);
+  const riskResult = calculateDamageRiskLevel(
+    book,
+    profile.totalBorrowCount,
+    profile.totalReadCount,
+    unresolvedDamages,
+    profile.isCirculationPaused
+  );
+  profile.damageRiskLevel = riskResult.level;
+  profile.damageRiskReasons = riskResult.reasons;
+  profile.currentCondition = calculateBookCondition(
+    unresolvedDamages,
+    profile.totalBorrowCount,
+    profile.totalReadCount
+  );
+  profile.updatedAt = now;
+
+  return profile;
+}
+
+export function generateCleaningReminder(bookId: string, bookTitle: string, lastCleanDate?: string): CareReminder {
+  const now = new Date();
+  let scheduled = new Date();
+  if (lastCleanDate) {
+    scheduled = new Date(new Date(lastCleanDate).getTime() + 30 * 24 * 3600 * 1000);
+    if (scheduled < now) scheduled = now;
+  } else {
+    scheduled.setDate(scheduled.getDate() + 30);
+  }
+
+  return {
+    id: '',
+    bookId,
+    bookTitle,
+    type: '清洁消毒',
+    title: '定期清洁消毒提醒',
+    description: '建议对绘本进行清洁消毒',
+    scheduledDate: formatDate(scheduled),
+    isCompleted: false,
+    priority: 'medium',
+    createdAt: now.toISOString(),
+    updatedAt: now.toISOString()
+  };
+}
+
+export function isDateValid(dateStr: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return false;
+  const d = new Date(dateStr);
+  return !isNaN(d.getTime());
+}
+
+export function isDateRangeValid(start: string, end: string): boolean {
+  if (!isDateValid(start) || !isDateValid(end)) return false;
+  return start <= end;
+}
+
+export function isValidBookCondition(condition: string): condition is BookCondition {
+  return ['全新', '良好', '一般', '较差', '破损'].includes(condition);
+}
+
+export function isValidDamageType(type: string): boolean {
+  return ['污渍', '缺页', '发声失灵', '撕页', '涂鸦', '装订松散', '书脊损坏', '封面磨损', '其他'].includes(type);
+}
+
+export function isValidDamageRiskLevel(level: string): level is DamageRiskLevel {
+  return ['低', '中', '高', '极高'].includes(level);
+}
+
+export function isValidSeverity(severity: string): severity is '轻微' | '中度' | '严重' {
+  return ['轻微', '中度', '严重'].includes(severity);
+}
+
+export function isValidRepairStatus(status: string): boolean {
+  return ['待处理', '处理中', '已完成', '无法修复'].includes(status);
 }

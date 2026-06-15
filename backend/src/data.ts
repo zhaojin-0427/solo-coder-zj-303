@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Book, BorrowRecord, ReadingRecord, BabyInfo, BookTheme, InteractionType, RotationPlan, SharingCircle, SharedBook, ExchangeInvitation, AssessmentReport } from './types';
+import { Book, BorrowRecord, ReadingRecord, BabyInfo, BookTheme, InteractionType, RotationPlan, SharingCircle, SharedBook, ExchangeInvitation, AssessmentReport, BookCareProfile, DamageRecord, RepairRecord, CareReminder, BookCondition, DamageType, DamageRiskLevel } from './types';
 
 export const babyInfo: BabyInfo = {
   name: '小宝',
@@ -393,3 +393,182 @@ export let exchangeInvitations: ExchangeInvitation[] = [
 ];
 
 export let assessmentReports: AssessmentReport[] = [];
+
+export const bookConditions: BookCondition[] = ['全新', '良好', '一般', '较差', '破损'];
+export const damageTypes: DamageType[] = ['污渍', '缺页', '发声失灵', '撕页', '涂鸦', '装订松散', '书脊损坏', '封面磨损', '其他'];
+export const damageRiskLevels: DamageRiskLevel[] = ['低', '中', '高', '极高'];
+
+export const generateInitialCareProfiles = (): BookCareProfile[] => {
+  const profiles: BookCareProfile[] = [];
+  const now = new Date().toISOString();
+  const today = now.split('T')[0];
+
+  for (let i = 0; i < books.length; i++) {
+    const book = books[i];
+    const borrowCount = borrowRecords.filter(br => br.bookId === book.id).length;
+    const readCount = readingRecords.filter(rr => rr.bookId === book.id).length;
+
+    let condition: BookCondition = '良好';
+    let riskLevel: DamageRiskLevel = '低';
+    let isPaused = false;
+    const reasons: string[] = [];
+    const damageRecords: DamageRecord[] = [];
+    const repairRecords: RepairRecord[] = [];
+    const reminders: CareReminder[] = [];
+
+    if (borrowCount >= 3) {
+      condition = '一般';
+      riskLevel = '中';
+      reasons.push('借阅次数较多');
+    }
+    if (readCount >= 5) {
+      condition = '一般';
+      riskLevel = '中';
+      reasons.push('阅读频次较高');
+    }
+    if (book.interactionType === '翻翻') {
+      reasons.push('翻翻书损耗风险较高');
+    }
+    if (book.interactionType === '发声') {
+      riskLevel = borrowCount >= 2 ? '高' : '中';
+      reasons.push('发声书电子元件易损坏');
+    }
+    if (reasons.length === 0) {
+      reasons.push('状态良好，风险较低');
+    }
+
+    if (i === 0) {
+      damageRecords.push({
+        id: uuidv4(),
+        bookId: book.id,
+        bookTitle: book.title,
+        damageType: '污渍',
+        severity: '轻微',
+        description: '封面有轻微的果汁污渍',
+        location: '封面右下角',
+        discoveredDate: '2025-05-20',
+        discoveredBy: CURRENT_USER_NAME,
+        resolved: false,
+        createdAt: '2025-05-20T00:00:00.000Z',
+        updatedAt: '2025-05-20T00:00:00.000Z'
+      });
+      condition = '一般';
+      riskLevel = '中';
+      reasons.push('存在未处理的轻微污渍');
+    }
+
+    if (i === 5) {
+      damageRecords.push({
+        id: uuidv4(),
+        bookId: book.id,
+        bookTitle: book.title,
+        damageType: '发声失灵',
+        severity: '严重',
+        description: '两个发声按钮失灵',
+        location: '第3页和第5页',
+        discoveredDate: '2025-06-05',
+        discoveredBy: CURRENT_USER_NAME,
+        resolved: false,
+        createdAt: '2025-06-05T00:00:00.000Z',
+        updatedAt: '2025-06-05T00:00:00.000Z'
+      });
+      repairRecords.push({
+        id: uuidv4(),
+        bookId: book.id,
+        bookTitle: book.title,
+        repairType: '更换电池/检查电路',
+        description: '尝试更换电池',
+        repairDate: '2025-06-06',
+        repairedBy: CURRENT_USER_NAME,
+        status: '处理中',
+        createdAt: '2025-06-06T00:00:00.000Z',
+        updatedAt: '2025-06-06T00:00:00.000Z'
+      });
+      condition = '较差';
+      riskLevel = '高';
+      isPaused = true;
+      reasons.length = 0;
+      reasons.push('发声功能严重故障');
+      reasons.push('维修中');
+
+      const nextWeek = new Date();
+      nextWeek.setDate(nextWeek.getDate() + 7);
+      reminders.push({
+        id: uuidv4(),
+        bookId: book.id,
+        bookTitle: book.title,
+        type: '维修跟进',
+        title: '发声书维修跟进',
+        description: '检查发声功能维修情况复查',
+        scheduledDate: nextWeek.toISOString().split('T')[0],
+        isCompleted: false,
+        priority: 'high',
+        createdAt: now,
+        updatedAt: now
+      });
+    }
+
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const twoWeeksAgo = new Date();
+    twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+
+    reminders.push({
+      id: uuidv4(),
+      bookId: book.id,
+      bookTitle: book.title,
+      type: '清洁消毒',
+      title: '定期清洁消毒',
+      description: '建议每30天进行一次清洁消毒',
+      scheduledDate: thirtyDaysAgo.toISOString().split('T')[0],
+      isCompleted: i < 3,
+      completedAt: i < 3 ? thirtyDaysAgo.toISOString().split('T')[0] : undefined,
+      priority: 'medium',
+      createdAt: thirtyDaysAgo.toISOString(),
+      updatedAt: thirtyDaysAgo.toISOString()
+    });
+
+    if (!reminders.some(r => r.type === '损耗复查' && !r.isCompleted)) {
+      const twoWeeksLater = new Date();
+      twoWeeksLater.setDate(twoWeeksLater.getDate() + 14);
+      reminders.push({
+        id: uuidv4(),
+        bookId: book.id,
+        bookTitle: book.title,
+        type: '损耗复查',
+        title: '定期损耗检查',
+        description: '检查绘本是否有新增损耗',
+        scheduledDate: twoWeeksLater.toISOString().split('T')[0],
+        isCompleted: false,
+        priority: 'low',
+        createdAt: now,
+        updatedAt: now
+      });
+    }
+
+    profiles.push({
+      id: uuidv4(),
+      bookId: book.id,
+      bookTitle: book.title,
+      currentCondition: condition,
+      lastCleanDate: i < 3 ? thirtyDaysAgo.toISOString().split('T')[0] : undefined,
+      lastInspectionDate: i < 5 ? twoWeeksAgo.toISOString().split('T')[0] : undefined,
+      totalBorrowCount: borrowCount,
+      totalReadCount: readCount,
+      damageRiskLevel: riskLevel,
+      damageRiskReasons: reasons,
+      isCirculationPaused: isPaused,
+      pauseReason: isPaused ? '维修中' : undefined,
+      expectedResumeDate: isPaused ? new Date(Date.now() + 14 * 24 * 3600 * 1000).toISOString().split('T')[0] : undefined,
+      damageRecords,
+      repairRecords,
+      reminders,
+      createdAt: now,
+      updatedAt: now
+    });
+  }
+
+  return profiles;
+};
+
+export let bookCareProfiles: BookCareProfile[] = generateInitialCareProfiles();

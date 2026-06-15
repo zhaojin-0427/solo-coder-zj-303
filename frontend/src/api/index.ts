@@ -16,7 +16,15 @@ import type {
   BookTheme,
   AssessmentReport,
   AssessmentOverview,
-  AssessmentPeriodType
+  AssessmentPeriodType,
+  BookCareProfile,
+  DamageRecord,
+  RepairRecord,
+  CareReminder,
+  CareStats,
+  CareMeta,
+  DamageRiskLevel,
+  BookCondition
 } from '@/types';
 
 const api = axios.create({
@@ -177,4 +185,79 @@ export const assessmentApi = {
     api.patch<AssessmentReport>(`/assessments/${id}/interventions/${interventionIndex}/status`, { status }).then(r => r.data),
   getOverview: () =>
     api.get<AssessmentOverview>('/assessments/summary/overview').then(r => r.data)
+};
+
+export const careApi = {
+  getMeta: () => api.get<CareMeta>('/care/meta').then(r => r.data),
+
+  getProfiles: (params?: {
+    bookId?: string;
+    riskLevel?: DamageRiskLevel;
+    isPaused?: boolean;
+    condition?: BookCondition;
+    unresolved?: boolean;
+  }) => api.get<BookCareProfile[]>('/care/profiles', { params }).then(r => r.data),
+
+  getProfile: (bookId: string) =>
+    api.get<BookCareProfile>(`/care/profiles/${bookId}`).then(r => r.data),
+
+  createProfile: (bookId: string, data: {
+    currentCondition: BookCondition;
+    conditionDescription?: string;
+    lastCleanDate?: string;
+    lastInspectionDate?: string;
+  }) => api.post<BookCareProfile>(`/care/profiles/${bookId}`, data).then(r => r.data),
+
+  updateProfile: (bookId: string, data: {
+    currentCondition?: BookCondition;
+    conditionDescription?: string;
+    lastCleanDate?: string;
+    lastInspectionDate?: string;
+  }) => api.put<BookCareProfile>(`/care/profiles/${bookId}`, data).then(r => r.data),
+
+  pauseCirculation: (bookId: string, data: {
+    pauseReason: string;
+    expectedResumeDate?: string;
+  }) => api.patch<BookCareProfile>(`/care/profiles/${bookId}/pause`, data).then(r => r.data),
+
+  resumeCirculation: (bookId: string) =>
+    api.patch<BookCareProfile>(`/care/profiles/${bookId}/resume`).then(r => r.data),
+
+  addDamage: (bookId: string, data: {
+    damageType: string;
+    severity: '轻微' | '中度' | '严重';
+    description: string;
+    location?: string;
+    discoveredDate: string;
+    discoveredBy?: string;
+  }) => api.post<DamageRecord>(`/care/profiles/${bookId}/damages`, data).then(r => r.data),
+
+  resolveDamage: (damageId: string, data: { resolutionNote: string }) =>
+    api.patch<DamageRecord>(`/care/damages/${damageId}/resolve`, data).then(r => r.data),
+
+  addRepair: (bookId: string, data: {
+    damageRecordId?: string;
+    repairType: string;
+    description: string;
+    repairDate: string;
+    repairedBy?: string;
+    cost?: number;
+  }) => api.post<RepairRecord>(`/care/profiles/${bookId}/repairs`, data).then(r => r.data),
+
+  updateRepairStatus: (repairId: string, data: {
+    status: string;
+    notes?: string;
+  }) => api.patch<RepairRecord>(`/care/repairs/${repairId}/status`, data).then(r => r.data),
+
+  getReminders: (params?: {
+    isCompleted?: boolean;
+    type?: string;
+    priority?: string;
+    overdue?: boolean;
+  }) => api.get<CareReminder[]>('/care/reminders', { params }).then(r => r.data),
+
+  completeReminder: (reminderId: string) =>
+    api.patch<CareReminder>(`/care/reminders/${reminderId}/complete`).then(r => r.data),
+
+  getStats: () => api.get<CareStats>('/care/stats').then(r => r.data)
 };

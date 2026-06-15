@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { rotationApi, babyApi, assessmentApi } from '@/api'
-import type { RotationPlan, RotationPlanItem, BabyInfo, AssessmentOverview } from '@/types'
+import { rotationApi, babyApi, assessmentApi, careApi } from '@/api'
+import type { RotationPlan, RotationPlanItem, BabyInfo, AssessmentOverview, BookCareProfile, DamageRiskLevel } from '@/types'
 
 const plan = ref<RotationPlan | null>(null)
 const babyInfo = ref<BabyInfo | null>(null)
@@ -11,18 +11,22 @@ const showSkipModal = ref(false)
 const skipItem = ref<RotationPlanItem | null>(null)
 const skipReason = ref('')
 const assessmentOverview = ref<AssessmentOverview | null>(null)
+const careProfiles = ref<BookCareProfile[]>([])
+const showFilteredAlert = ref(false)
 
 const loadData = async () => {
   loading.value = true
   try {
-    const [info, currentPlan, overview] = await Promise.all([
+    const [info, currentPlan, overview, profiles] = await Promise.all([
       babyApi.getInfo(),
       rotationApi.getCurrent().catch(() => null),
-      assessmentApi.getOverview().catch(() => null)
+      assessmentApi.getOverview().catch(() => null),
+      careApi.getProfiles().catch(() => [])
     ])
     babyInfo.value = info
     plan.value = currentPlan
     assessmentOverview.value = overview
+    careProfiles.value = profiles
   } catch (e) {
     console.error('加载数据失败', e)
   } finally {
@@ -33,13 +37,32 @@ const loadData = async () => {
 const generatePlan = async () => {
   if (!confirm('确定要生成本周的轮换计划吗？')) return
   generating.value = true
+  showFilteredAlert.value = false
   try {
     plan.value = await rotationApi.generate(5)
+    showFilteredAlert.value = true
   } catch (e: any) {
     alert(e.response?.data?.error || '生成计划失败')
   } finally {
     generating.value = false
   }
+}
+
+const riskColors: Record<DamageRiskLevel, { color: string; bg: string }> = {
+  '低': { color: '#52c41a', bg: '#f6ffed' },
+  '中': { color: '#1890ff', bg: '#e6f7ff' },
+  '高': { color: '#faad14', bg: '#fffbe6' },
+  '极高': { color: '#ff4d4f', bg: '#fff1f0' }
+}
+
+const getCareProfile = (bookId: string): BookCareProfile | undefined => {
+  return careProfiles.value.find(p => p.bookId === bookId)
+}
+
+const isBookBlocked = (bookId: string): boolean => {
+  const profile = getCareProfile(bookId)
+  if (!profile) return false
+  return profile.isCirculationPaused || profile.damageRiskLevel === '极高'
 }
 
 const toggleFocus = async (item: RotationPlanItem) => {
@@ -150,6 +173,12 @@ onMounted(() => {
       </button>
     </div>
 
+    <div v-if="showFilteredAlert && plan" class="filtered-alert-card">
+      <span class="filtered-alert-icon">⚠️</span>
+      <span class="filtered-alert-text">系统已自动排除高风险或暂停流转的绘本，如需要调整请前往绘本保养页面</span>
+      <button class="filtered-alert-close" @click="showFilteredAlert = false">×</button>
+    </div>
+
     <div v-if="babyInfo && plan" class="plan-header-card">
       <div class="plan-info">
         <div class="plan-week">
@@ -254,15 +283,33 @@ onMounted(() => {
         <div class="item-content">
           <div class="item-header">
             <h3 class="book-title-plan">{{ item.bookTitle }}</h3>
-            <span 
-              class="status-tag"
-              :style="{ 
-                color: getStatusColor(item.status),
-                background: getStatusBg(item.status)
-              }"
-            >
-              {{ item.status }}
-            </span>
+            <div class="header-tags">
+              <span
+                v-if="getCareProfile(item.bookId)"
+                class="risk-tag"
+                :style="{
+                  color: riskColors[getCareProfile(item.bookId)!.damageRiskLevel].color,
+                  background: riskColors[getCareProfile(item.bookId)!.damageRiskLevel].bg
+                }"
+              >
+                ⚠️ {{ getCareProfile(item.bookId)!.damageRiskLevel }}风险
+              </span>
+              <span
+                v-if="getCareProfile(item.bookId) && (getCareProfile(item.bookId)!.isCirculationPaused || getCareProfile(item.bookId)!.damageRiskLevel === '高' || getCareProfile(item.bookId)!.damageRiskLevel === '极高')"
+                class="blocked-tag"
+              >
+                🚫 高风险/暂停流转
+              </span>
+              <span
+                class="status-tag"
+                :style="{
+                  color: getStatusColor(item.status),
+                  background: getStatusBg(item.status)
+                }"
+              >
+                {{ item.status }}
+              </span>
+            </div>
           </div>
 
           <div class="book-meta-plan">
@@ -668,6 +715,33 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
+.header-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.risk-tag {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.blocked-tag {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  flex-shrink: 0;
+  background: #fff1f0;
+  color: #ff4d4f;
+  border: 1px solid #ffccc7;
+}
+
 .book-meta-plan {
   display: flex;
   flex-wrap: wrap;
@@ -1002,5 +1076,44 @@ onMounted(() => {
 .dim-tag.一般 {
   background: #fffbe6;
   color: #faad14;
+}
+
+.filtered-alert-card {
+  background: #fffbe6;
+  border-left: 4px solid #faad14;
+  border-radius: 8px;
+  padding: 14px 20px;
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.filtered-alert-icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.filtered-alert-text {
+  flex: 1;
+  font-size: 14px;
+  color: #ad6800;
+  font-weight: 500;
+}
+
+.filtered-alert-close {
+  background: none;
+  border: none;
+  font-size: 20px;
+  color: #ad6800;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.filtered-alert-close:hover {
+  color: #874d00;
 }
 </style>

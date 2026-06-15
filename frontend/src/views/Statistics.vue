@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { statsApi, rotationApi, assessmentApi } from '@/api'
-import type { Statistics, RotationPlanStats, AssessmentOverview } from '@/types'
+import { statsApi, rotationApi, assessmentApi, careApi } from '@/api'
+import type { Statistics, RotationPlanStats, AssessmentOverview, CareStats, BookTheme, DamageType } from '@/types'
 
 const router = useRouter()
 import VChart from 'vue-echarts'
@@ -30,19 +30,22 @@ use([
 const stats = ref<Statistics | null>(null)
 const rotationStats = ref<RotationPlanStats | null>(null)
 const assessmentOverview = ref<AssessmentOverview | null>(null)
+const careStats = ref<CareStats | null>(null)
 const loading = ref(false)
 
 const loadStats = async () => {
   loading.value = true
   try {
-    const [s, rs, ao] = await Promise.all([
+    const [s, rs, ao, cs] = await Promise.all([
       statsApi.getStatistics(),
       rotationApi.getStats().catch(() => null),
-      assessmentApi.getOverview().catch(() => null)
+      assessmentApi.getOverview().catch(() => null),
+      careApi.getStats().catch(() => null)
     ])
     stats.value = s
     rotationStats.value = rs
     assessmentOverview.value = ao
+    careStats.value = cs
   } catch (e) {
     console.error('加载统计数据失败', e)
   } finally {
@@ -265,6 +268,49 @@ const exchangeThemeChartOption = computed(() => {
   }
 })
 
+const themeDamageChartOption = computed(() => {
+  if (!careStats.value || !careStats.value.themeDamageDistribution || careStats.value.themeDamageDistribution.length === 0) return {}
+  const data = careStats.value.themeDamageDistribution
+  return {
+    title: {
+      text: '各主题损耗次数分布',
+      left: 'center',
+      textStyle: { fontSize: 14, fontWeight: 600 }
+    },
+    tooltip: {
+      trigger: 'axis',
+      formatter: '{b}: {c}次'
+    },
+    xAxis: {
+      type: 'category',
+      data: data.map(d => d.theme),
+      axisLabel: { fontSize: 12, rotate: 30 }
+    },
+    yAxis: {
+      type: 'value',
+      name: '次数',
+      nameTextStyle: { fontSize: 12 }
+    },
+    series: [{
+      type: 'bar',
+      data: data.map(d => d.count),
+      itemStyle: {
+        color: {
+          type: 'linear',
+          x: 0, y: 0, x2: 0, y2: 1,
+          colorStops: [
+            { offset: 0, color: '#f5576c' },
+            { offset: 1, color: '#fa709a' }
+          ]
+        },
+        borderRadius: [4, 4, 0, 0]
+      },
+      barWidth: '50%'
+    }],
+    grid: { left: 50, right: 20, top: 50, bottom: 60 }
+  }
+})
+
 onMounted(() => {
   loadStats()
 })
@@ -451,6 +497,21 @@ onMounted(() => {
           <p>暂无换书记录，快去共享换书页面发起第一次换书吧</p>
         </div>
       </div>
+      <div
+        v-if="careStats?.themeDamageDistribution && careStats.themeDamageDistribution.length > 0"
+        class="chart-card"
+      >
+        <v-chart :option="themeDamageChartOption" style="height: 300px;" autoresize />
+      </div>
+      <div
+        v-else
+        class="chart-card no-damage-card"
+      >
+        <div class="no-skipped-content">
+          <span class="happy-icon">🛡️</span>
+          <p>暂无损耗记录，绘本保护得很好！</p>
+        </div>
+      </div>
       <div class="chart-card idle-books-card">
         <h3 class="card-title">⚠️ 长期闲置绘本提醒</h3>
         <div v-if="stats?.idleBooks && stats.idleBooks.length > 0" class="idle-list">
@@ -551,6 +612,12 @@ onMounted(() => {
 .stat-card.sharing-orange { border-left-color: #fa8c16; }
 
 .no-exchange-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.no-damage-card {
   display: flex;
   align-items: center;
   justify-content: center;

@@ -2,17 +2,22 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import {
   books, borrowRecords, readingRecords, babyInfo, themes, interactionTypes, rotationPlans,
-  sharingCircles, sharedBooks, exchangeInvitations, CURRENT_USER_ID, CURRENT_USER_NAME, assessmentReports
+  sharingCircles, sharedBooks, exchangeInvitations, CURRENT_USER_ID, CURRENT_USER_NAME, assessmentReports,
+  bookCareProfiles, bookConditions, damageTypes, damageRiskLevels
 } from './data';
 import {
   Book, BookStatus, BorrowRecord, ReadingRecord, RotationPlan, RotationItemStatus, RotationPlanStats,
   SharingCircle, SharedBook, ExchangeInvitation, ExchangeInvitationStatus, BookTheme, SharingStats,
-  AssessmentReport, AssessmentPeriodType, AssessmentReportStatus
+  AssessmentReport, AssessmentPeriodType, AssessmentReportStatus,
+  BookCareProfile, DamageRecord, RepairRecord, CareReminder, BookCondition, DamageType, DamageRiskLevel,
+  RepairStatus, CareStats
 } from './types';
 import { recommendBooks, calculateBabyAgeMonths, isOverdue, getWeekRange, generateRotationPlanItems,
   calculateReadingStability, calculateThemeBalance, calculateAgeMatch, calculateInteractionParticipation,
   calculateRotationCompletion, calculateExchangeExpansion, generateAlerts, generateInterventions,
-  buildSnapshot, getOverallLevel, getPeriodRange
+  buildSnapshot, getOverallLevel, getPeriodRange, updateCareProfileOnAction, calculateDamageRiskLevel,
+  calculateBookCondition, generateCleaningReminder, isDateValid, isDateRangeValid,
+  isValidBookCondition, isValidDamageType, isValidSeverity, isValidRepairStatus, formatDate
 } from './utils';
 
 const router = Router();
@@ -158,23 +163,57 @@ router.post('/borrow-records', (req, res) => {
     res.status(400).json({ error: '绘本当前状态不可借出' });
     return;
   }
+
+  const careProfile = bookCareProfiles.find(p => p.bookId === bookId);
+  if (careProfile) {
+    if (careProfile.isCirculationPaused) {
+      res.status(400).json({ error: `该绘本已暂停流转${careProfile.pauseReason ? '：' + careProfile.pauseReason : ''}，预计恢复时间：${careProfile.expectedResumeDate || '待定'}` });
+      return;
+    }
+    if (careProfile.damageRiskLevel === '极高') {
+      res.status(400).json({ error: `该绘本损耗风险等级为"极高"，暂不可借出，请先进行养护处理` });
+      return;
+    }
+  }
+
+  if (!borrower || !String(borrower).trim()) {
+    res.status(400).json({ error: '借阅人不能为空' });
+    return;
+  }
+  if (!expectedReturnDate || !isDateValid(String(expectedReturnDate))) {
+    res.status(400).json({ error: '预计归还日期格式无效' });
+    return;
+  }
+  const finalBorrowDate = borrowDate || new Date().toISOString().split('T')[0];
+  if (!isDateValid(String(finalBorrowDate))) {
+    res.status(400).json({ error: '借出日期格式无效' });
+    return;
+  }
+  if (String(expectedReturnDate) < String(finalBorrowDate)) {
+    res.status(400).json({ error: '预计归还日期不能早于借出日期' });
+    return;
+  }
   
   const newRecord: BorrowRecord = {
     id: uuidv4(),
     bookId,
     bookTitle: book.title,
-    borrower,
-    borrowerPhone,
-    borrowDate: borrowDate || new Date().toISOString().split('T')[0],
-    expectedReturnDate,
+    borrower: String(borrower).trim(),
+    borrowerPhone: borrowerPhone ? String(borrowerPhone).trim() : undefined,
+    borrowDate: finalBorrowDate,
+    expectedReturnDate: String(expectedReturnDate),
     status: '借出中',
-    notes,
+    notes: notes ? String(notes).trim() : undefined,
     createdAt: new Date().toISOString()
   };
   
   borrowRecords.push(newRecord);
   book.status = '借出';
   book.updatedAt = new Date().toISOString();
+
+  if (careProfile) {
+    updateCareProfileOnAction(careProfile, book, 'borrow');
+  }
   
   res.status(201).json(newRecord);
 });
@@ -187,13 +226,28 @@ router.post('/borrow-records/:id/return', (req, res) => {
   }
   
   const { returnDate } = req.body;
-  record.actualReturnDate = returnDate || new Date().toISOString().split('T')[0];
+  const finalReturnDate = returnDate || new Date().toISOString().split('T')[0];
+  if (!isDateValid(String(finalReturnDate))) {
+    res.status(400).json({ error: '归还日期格式无效' });
+    return;
+  }
+  if (String(finalReturnDate) < record.borrowDate) {
+    res.status(400).json({ error: '归还日期不能早于借出日期' });
+    return;
+  }
+
+  record.actualReturnDate = finalReturnDate;
   record.status = '已归还';
   
   const book = books.find(b => b.id === record.bookId);
   if (book) {
     book.status = '在家';
     book.updatedAt = new Date().toISOString();
+
+    const careProfile = bookCareProfiles.find(p => p.bookId === book.id);
+    if (careProfile) {
+      updateCareProfileOnAction(careProfile, book, 'return');
+    }
   }
   
   res.json(record);
@@ -223,9 +277,17 @@ router.post('/reading-records', (req, res) => {
     res.status(404).json({ error: '绘本不存在' });
     return;
   }
-  
+
+  if (duration === undefined || duration === null) {
+    res.status(400).json({ error: '阅读时长为必填项' });
+    return;
+  }
   const durationNum = Math.max(0, Number(duration) || 0);
   const finalReadDate = readDate || new Date().toISOString().split('T')[0];
+  if (!isDateValid(String(finalReadDate))) {
+    res.status(400).json({ error: '阅读日期格式无效' });
+    return;
+  }
   
   const newRecord: ReadingRecord = {
     id: uuidv4(),
@@ -234,12 +296,17 @@ router.post('/reading-records', (req, res) => {
     readDate: finalReadDate,
     duration: durationNum,
     babyAgeMonths: Number(babyAgeMonths) || calculateBabyAgeMonths(babyInfo.birthDate),
-    reaction,
-    notes,
+    reaction: reaction ? String(reaction).trim() : undefined,
+    notes: notes ? String(notes).trim() : undefined,
     createdAt: new Date().toISOString()
   };
   
   readingRecords.push(newRecord);
+
+  const careProfile = bookCareProfiles.find(p => p.bookId === bookId);
+  if (careProfile) {
+    updateCareProfileOnAction(careProfile, book, 'reading');
+  }
   
   const { start, end } = getWeekRange(new Date());
   const currentPlan = rotationPlans.find(p => 
@@ -459,7 +526,8 @@ router.post('/rotation-plans/generate', (req, res) => {
     books,
     babyAge,
     readingRecords.map(r => ({ bookId: r.bookId, readDate: r.readDate })),
-    Number(weekSize) || 5
+    Number(weekSize) || 5,
+    bookCareProfiles
   );
   
   if (items.length === 0) {
@@ -759,8 +827,10 @@ router.delete('/sharing/circles/:id', (req, res) => {
     return;
   }
   const circleBooksToRemove = sharedBooks.filter(sb => sb.circleId === circle.id).map(sb => sb.id);
-  sharedBooks = sharedBooks.filter(sb => sb.circleId !== circle.id);
-  exchangeInvitations = exchangeInvitations.filter(ei => !circleBooksToRemove.includes(ei.targetBookId) && !circleBooksToRemove.includes(ei.offeredBookId));
+  const newSharedBooks = sharedBooks.filter(sb => sb.circleId !== circle.id);
+  const newExchanges = exchangeInvitations.filter(ei => !circleBooksToRemove.includes(ei.targetBookId) && !circleBooksToRemove.includes(ei.offeredBookId));
+  sharedBooks.splice(0, sharedBooks.length, ...newSharedBooks);
+  exchangeInvitations.splice(0, exchangeInvitations.length, ...newExchanges);
   sharingCircles.splice(index, 1);
   res.json({ message: '删除成功' });
 });
@@ -839,6 +909,18 @@ router.post('/sharing/books', (req, res) => {
   if (book.status === '借出' || book.status === '预留' || book.status === '转送') {
     res.status(400).json({ error: '已借出、预留或转送的绘本不能加入共享书单' });
     return;
+  }
+
+  const careProfile = bookCareProfiles.find(p => p.bookId === String(bookId));
+  if (careProfile) {
+    if (careProfile.isCirculationPaused) {
+      res.status(400).json({ error: `该绘本已暂停流转${careProfile.pauseReason ? '：' + careProfile.pauseReason : ''}，不能加入共享书单` });
+      return;
+    }
+    if (careProfile.damageRiskLevel === '极高') {
+      res.status(400).json({ error: '该绘本损耗风险等级为"极高"，不能加入共享书单，请先进行养护处理' });
+      return;
+    }
   }
 
   const exists = sharedBooks.find(sb => sb.circleId === String(circleId) && sb.bookId === String(bookId));
@@ -925,9 +1007,10 @@ router.delete('/sharing/books/:id', (req, res) => {
     return;
   }
   sharedBooks.splice(index, 1);
-  exchangeInvitations = exchangeInvitations.filter(ei =>
+  const filteredExchanges = exchangeInvitations.filter(ei =>
     ei.targetBookId !== sb.id && ei.offeredBookId !== sb.id
   );
+  exchangeInvitations.splice(0, exchangeInvitations.length, ...filteredExchanges);
   res.json({ message: '移除成功' });
 });
 
@@ -1005,6 +1088,29 @@ router.post('/sharing/exchanges', (req, res) => {
   if (invalidStatuses.includes(offeredBook.borrowStatus)) {
     res.status(400).json({ error: '拟交换绘本已借出、预留或转送，无法发起邀约' });
     return;
+  }
+
+  const targetCareProfile = bookCareProfiles.find(p => p.bookId === targetBook.bookId);
+  if (targetCareProfile) {
+    if (targetCareProfile.isCirculationPaused) {
+      res.status(400).json({ error: `目标绘本已暂停流转${targetCareProfile.pauseReason ? '：' + targetCareProfile.pauseReason : ''}，无法发起换书邀约` });
+      return;
+    }
+    if (targetCareProfile.damageRiskLevel === '极高') {
+      res.status(400).json({ error: '目标绘本损耗风险等级为"极高"，无法发起换书邀约' });
+      return;
+    }
+  }
+  const offeredCareProfile = bookCareProfiles.find(p => p.bookId === offeredBook.bookId);
+  if (offeredCareProfile) {
+    if (offeredCareProfile.isCirculationPaused) {
+      res.status(400).json({ error: `拟交换绘本已暂停流转${offeredCareProfile.pauseReason ? '：' + offeredCareProfile.pauseReason : ''}，无法发起换书邀约` });
+      return;
+    }
+    if (offeredCareProfile.damageRiskLevel === '极高') {
+      res.status(400).json({ error: '拟交换绘本损耗风险等级为"极高"，无法发起换书邀约' });
+      return;
+    }
   }
 
   const duplicatePending = exchangeInvitations.find(ei =>
@@ -1225,6 +1331,21 @@ router.post('/sharing/exchanges/:id/complete', (req, res) => {
   invitation.status = '已完成';
   invitation.completedAt = now;
   invitation.updatedAt = now;
+
+  if (target) {
+    const tProfile = bookCareProfiles.find(p => p.bookId === target.bookId);
+    const tBook = books.find(b => b.id === target.bookId);
+    if (tProfile && tBook) {
+      updateCareProfileOnAction(tProfile, tBook, 'exchangeComplete');
+    }
+  }
+  if (offered) {
+    const oProfile = bookCareProfiles.find(p => p.bookId === offered.bookId);
+    const oBook = books.find(b => b.id === offered.bookId);
+    if (oProfile && oBook) {
+      updateCareProfileOnAction(oProfile, oBook, 'exchangeComplete');
+    }
+  }
 
   refreshSharedBookRefs();
   res.json(invitation);
@@ -1526,6 +1647,711 @@ router.get('/assessments/summary/overview', (req, res) => {
     pendingInterventions,
     dimensions: latest.dimensions
   });
+});
+
+// ==================== 绘本养护模块 API ====================
+
+router.get('/care/meta', (req, res) => {
+  res.json({
+    bookConditions,
+    damageTypes,
+    damageRiskLevels,
+    repairStatuses: ['待处理', '处理中', '已完成', '无法修复'],
+    reminderTypes: ['清洁消毒', '损耗复查', '维修跟进'],
+    severities: ['轻微', '中度', '严重']
+  });
+});
+
+router.get('/care/profiles', (req, res) => {
+  const { bookId, riskLevel, isPaused, condition, unresolved } = req.query;
+  let filtered = [...bookCareProfiles];
+
+  if (bookId) {
+    filtered = filtered.filter(p => p.bookId === String(bookId));
+  }
+  if (riskLevel) {
+    filtered = filtered.filter(p => p.damageRiskLevel === riskLevel);
+  }
+  if (isPaused !== undefined) {
+    const wantPaused = String(isPaused) === 'true';
+    filtered = filtered.filter(p => p.isCirculationPaused === wantPaused);
+  }
+  if (condition) {
+    filtered = filtered.filter(p => p.currentCondition === condition);
+  }
+  if (unresolved === 'true') {
+    filtered = filtered.filter(p => p.damageRecords.some(d => !d.resolved));
+  }
+
+  filtered.sort((a, b) => {
+    const riskOrder: Record<string, number> = { '极高': 4, '高': 3, '中': 2, '低': 1 };
+    if (a.isCirculationPaused !== b.isCirculationPaused) {
+      return a.isCirculationPaused ? -1 : 1;
+    }
+    return (riskOrder[b.damageRiskLevel] || 0) - (riskOrder[a.damageRiskLevel] || 0);
+  });
+
+  res.json(filtered);
+});
+
+router.get('/care/profiles/:bookId', (req, res) => {
+  const profile = bookCareProfiles.find(p => p.bookId === req.params.bookId);
+  if (!profile) {
+    const book = books.find(b => b.id === req.params.bookId);
+    if (!book) {
+      res.status(404).json({ error: '绘本不存在' });
+      return;
+    }
+    const borrowCount = borrowRecords.filter(br => br.bookId === book.id).length;
+    const readCount = readingRecords.filter(rr => rr.bookId === book.id).length;
+    const now = new Date().toISOString();
+    const riskResult = calculateDamageRiskLevel(book, borrowCount, readCount, [], false);
+    const newProfile: BookCareProfile = {
+      id: uuidv4(),
+      bookId: book.id,
+      bookTitle: book.title,
+      currentCondition: calculateBookCondition([], borrowCount, readCount),
+      totalBorrowCount: borrowCount,
+      totalReadCount: readCount,
+      damageRiskLevel: riskResult.level,
+      damageRiskReasons: riskResult.reasons,
+      isCirculationPaused: false,
+      damageRecords: [],
+      repairRecords: [],
+      reminders: [generateCleaningReminder(book.id, book.title)],
+      createdAt: now,
+      updatedAt: now
+    };
+    bookCareProfiles.push(newProfile);
+    res.json(newProfile);
+    return;
+  }
+  res.json(profile);
+});
+
+router.post('/care/profiles/:bookId', (req, res) => {
+  const book = books.find(b => b.id === req.params.bookId);
+  if (!book) {
+    res.status(404).json({ error: '绘本不存在' });
+    return;
+  }
+
+  const existing = bookCareProfiles.find(p => p.bookId === req.params.bookId);
+  if (existing) {
+    res.status(400).json({ error: '该绘本养护档案已存在' });
+    return;
+  }
+
+  const borrowCount = borrowRecords.filter(br => br.bookId === book.id).length;
+  const readCount = readingRecords.filter(rr => rr.bookId === book.id).length;
+  const now = new Date().toISOString();
+  const riskResult = calculateDamageRiskLevel(book, borrowCount, readCount, [], false);
+
+  const newProfile: BookCareProfile = {
+    id: uuidv4(),
+    bookId: book.id,
+    bookTitle: book.title,
+    currentCondition: calculateBookCondition([], borrowCount, readCount),
+    totalBorrowCount: borrowCount,
+    totalReadCount: readCount,
+    damageRiskLevel: riskResult.level,
+    damageRiskReasons: riskResult.reasons,
+    isCirculationPaused: false,
+    damageRecords: [],
+    repairRecords: [],
+    reminders: [generateCleaningReminder(book.id, book.title)],
+    createdAt: now,
+    updatedAt: now
+  };
+
+  bookCareProfiles.push(newProfile);
+  res.status(201).json(newProfile);
+});
+
+router.put('/care/profiles/:bookId', (req, res) => {
+  const index = bookCareProfiles.findIndex(p => p.bookId === req.params.bookId);
+  if (index === -1) {
+    res.status(404).json({ error: '养护档案不存在' });
+    return;
+  }
+
+  const { currentCondition, conditionDescription, lastCleanDate, lastInspectionDate,
+    isCirculationPaused, pauseReason, expectedResumeDate } = req.body;
+
+  const profile = bookCareProfiles[index];
+
+  if (currentCondition !== undefined) {
+    if (!isValidBookCondition(String(currentCondition))) {
+      res.status(400).json({ error: '无效的品相值' });
+      return;
+    }
+    profile.currentCondition = currentCondition as BookCondition;
+  }
+  if (conditionDescription !== undefined) {
+    profile.conditionDescription = String(conditionDescription).trim() || undefined;
+  }
+  if (lastCleanDate !== undefined) {
+    if (lastCleanDate && !isDateValid(String(lastCleanDate))) {
+      res.status(400).json({ error: '最后清洁日期格式无效' });
+      return;
+    }
+    profile.lastCleanDate = lastCleanDate ? String(lastCleanDate) : undefined;
+  }
+  if (lastInspectionDate !== undefined) {
+    if (lastInspectionDate && !isDateValid(String(lastInspectionDate))) {
+      res.status(400).json({ error: '最后检查日期格式无效' });
+      return;
+    }
+    profile.lastInspectionDate = lastInspectionDate ? String(lastInspectionDate) : undefined;
+  }
+  if (isCirculationPaused !== undefined) {
+    profile.isCirculationPaused = Boolean(isCirculationPaused);
+    if (!profile.isCirculationPaused) {
+      profile.pauseReason = undefined;
+      profile.expectedResumeDate = undefined;
+    }
+  }
+  if (pauseReason !== undefined && profile.isCirculationPaused) {
+    const reason = String(pauseReason).trim();
+    if (!reason) {
+      res.status(400).json({ error: '暂停原因不能为空' });
+      return;
+    }
+    profile.pauseReason = reason;
+  }
+  if (expectedResumeDate !== undefined && profile.isCirculationPaused) {
+    if (expectedResumeDate && !isDateValid(String(expectedResumeDate))) {
+      res.status(400).json({ error: '预计恢复日期格式无效' });
+      return;
+    }
+    profile.expectedResumeDate = expectedResumeDate ? String(expectedResumeDate) : undefined;
+  }
+
+  const book = books.find(b => b.id === profile.bookId);
+  if (book) {
+    const unresolvedDamages = profile.damageRecords.filter(d => !d.resolved);
+    const riskResult = calculateDamageRiskLevel(
+      book, profile.totalBorrowCount, profile.totalReadCount,
+      unresolvedDamages, profile.isCirculationPaused
+    );
+    profile.damageRiskLevel = riskResult.level;
+    profile.damageRiskReasons = riskResult.reasons;
+  }
+
+  profile.updatedAt = new Date().toISOString();
+  bookCareProfiles[index] = profile;
+  res.json(profile);
+});
+
+router.patch('/care/profiles/:bookId/pause', (req, res) => {
+  const index = bookCareProfiles.findIndex(p => p.bookId === req.params.bookId);
+  if (index === -1) {
+    res.status(404).json({ error: '养护档案不存在' });
+    return;
+  }
+
+  const { pauseReason, expectedResumeDate } = req.body;
+  const reason = String(pauseReason || '').trim();
+  if (!reason) {
+    res.status(400).json({ error: '暂停原因不能为空' });
+    return;
+  }
+  if (expectedResumeDate && !isDateValid(String(expectedResumeDate))) {
+    res.status(400).json({ error: '预计恢复日期格式无效' });
+    return;
+  }
+
+  const profile = bookCareProfiles[index];
+  profile.isCirculationPaused = true;
+  profile.pauseReason = reason;
+  profile.expectedResumeDate = expectedResumeDate ? String(expectedResumeDate) : undefined;
+  profile.updatedAt = new Date().toISOString();
+
+  const book = books.find(b => b.id === profile.bookId);
+  if (book) {
+    const riskResult = calculateDamageRiskLevel(
+      book, profile.totalBorrowCount, profile.totalReadCount,
+      profile.damageRecords.filter(d => !d.resolved), true
+    );
+    profile.damageRiskLevel = riskResult.level;
+    profile.damageRiskReasons = riskResult.reasons;
+  }
+
+  res.json(profile);
+});
+
+router.patch('/care/profiles/:bookId/resume', (req, res) => {
+  const index = bookCareProfiles.findIndex(p => p.bookId === req.params.bookId);
+  if (index === -1) {
+    res.status(404).json({ error: '养护档案不存在' });
+    return;
+  }
+
+  const profile = bookCareProfiles[index];
+  if (!profile.isCirculationPaused) {
+    res.status(400).json({ error: '该绘本未处于暂停流转状态' });
+    return;
+  }
+
+  profile.isCirculationPaused = false;
+  profile.pauseReason = undefined;
+  profile.expectedResumeDate = undefined;
+  profile.updatedAt = new Date().toISOString();
+
+  const book = books.find(b => b.id === profile.bookId);
+  if (book) {
+    const riskResult = calculateDamageRiskLevel(
+      book, profile.totalBorrowCount, profile.totalReadCount,
+      profile.damageRecords.filter(d => !d.resolved), false
+    );
+    profile.damageRiskLevel = riskResult.level;
+    profile.damageRiskReasons = riskResult.reasons;
+  }
+
+  res.json(profile);
+});
+
+router.post('/care/profiles/:bookId/damages', (req, res) => {
+  const profile = bookCareProfiles.find(p => p.bookId === req.params.bookId);
+  if (!profile) {
+    res.status(404).json({ error: '养护档案不存在' });
+    return;
+  }
+
+  const { damageType, severity, description, location, discoveredDate, discoveredBy, relatedBorrowRecordId } = req.body;
+
+  if (!damageType || !isValidDamageType(String(damageType))) {
+    res.status(400).json({ error: '请选择有效的损耗类型' });
+    return;
+  }
+  if (!severity || !isValidSeverity(String(severity))) {
+    res.status(400).json({ error: '请选择有效的损耗严重程度' });
+    return;
+  }
+  if (!description || !String(description).trim()) {
+    res.status(400).json({ error: '损耗描述不能为空' });
+    return;
+  }
+
+  const finalDiscoveredDate = discoveredDate || new Date().toISOString().split('T')[0];
+  if (!isDateValid(String(finalDiscoveredDate))) {
+    res.status(400).json({ error: '发现日期格式无效' });
+    return;
+  }
+
+  const now = new Date().toISOString();
+  const book = books.find(b => b.id === profile.bookId);
+
+  const newDamage: DamageRecord = {
+    id: uuidv4(),
+    bookId: profile.bookId,
+    bookTitle: profile.bookTitle,
+    damageType: damageType as DamageType,
+    severity: severity as '轻微' | '中度' | '严重',
+    description: String(description).trim(),
+    location: location ? String(location).trim() : undefined,
+    discoveredDate: String(finalDiscoveredDate),
+    discoveredBy: discoveredBy ? String(discoveredBy).trim() : undefined,
+    relatedBorrowRecordId: relatedBorrowRecordId ? String(relatedBorrowRecordId) : undefined,
+    resolved: false,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  profile.damageRecords.unshift(newDamage);
+
+  if (book) {
+    const unresolvedDamages = profile.damageRecords.filter(d => !d.resolved);
+    const riskResult = calculateDamageRiskLevel(
+      book, profile.totalBorrowCount, profile.totalReadCount,
+      unresolvedDamages, profile.isCirculationPaused
+    );
+    profile.damageRiskLevel = riskResult.level;
+    profile.damageRiskReasons = riskResult.reasons;
+    profile.currentCondition = calculateBookCondition(
+      unresolvedDamages, profile.totalBorrowCount, profile.totalReadCount
+    );
+  }
+
+  const nextWeek = new Date();
+  nextWeek.setDate(nextWeek.getDate() + 7);
+  const existingReminder = profile.reminders.find(
+    r => r.type === '损耗复查' && !r.isCompleted
+  );
+  if (!existingReminder) {
+    profile.reminders.push({
+      id: uuidv4(),
+      bookId: profile.bookId,
+      bookTitle: profile.bookTitle,
+      type: '损耗复查',
+      title: `新增${newDamage.severity}${newDamage.damageType}复查`,
+      description: `请检查${newDamage.damageType}处理进度`,
+      scheduledDate: formatDate(nextWeek),
+      isCompleted: false,
+      priority: newDamage.severity === '严重' ? 'high' : newDamage.severity === '中度' ? 'medium' : 'low',
+      createdAt: now,
+      updatedAt: now
+    });
+  }
+
+  profile.updatedAt = now;
+  res.status(201).json(newDamage);
+});
+
+router.patch('/care/damages/:damageId/resolve', (req, res) => {
+  let found = false;
+  let resolvedDamage: DamageRecord | null = null;
+
+  for (const profile of bookCareProfiles) {
+    const damageIndex = profile.damageRecords.findIndex(d => d.id === req.params.damageId);
+    if (damageIndex !== -1) {
+      const { resolutionNote } = req.body;
+      const note = String(resolutionNote || '').trim();
+      if (!note) {
+        res.status(400).json({ error: '处理说明不能为空' });
+        return;
+      }
+
+      const damage = profile.damageRecords[damageIndex];
+      damage.resolved = true;
+      damage.resolvedAt = new Date().toISOString();
+      damage.resolutionNote = note;
+      damage.updatedAt = new Date().toISOString();
+      resolvedDamage = damage;
+      found = true;
+
+      const book = books.find(b => b.id === profile.bookId);
+      if (book) {
+        const unresolvedDamages = profile.damageRecords.filter(d => !d.resolved);
+        const riskResult = calculateDamageRiskLevel(
+          book, profile.totalBorrowCount, profile.totalReadCount,
+          unresolvedDamages, profile.isCirculationPaused
+        );
+        profile.damageRiskLevel = riskResult.level;
+        profile.damageRiskReasons = riskResult.reasons;
+        profile.currentCondition = calculateBookCondition(
+          unresolvedDamages, profile.totalBorrowCount, profile.totalReadCount
+        );
+      }
+      profile.updatedAt = new Date().toISOString();
+      break;
+    }
+  }
+
+  if (!found) {
+    res.status(404).json({ error: '损耗记录不存在' });
+    return;
+  }
+
+  res.json(resolvedDamage);
+});
+
+router.post('/care/profiles/:bookId/repairs', (req, res) => {
+  const profile = bookCareProfiles.find(p => p.bookId === req.params.bookId);
+  if (!profile) {
+    res.status(404).json({ error: '养护档案不存在' });
+    return;
+  }
+
+  const { damageRecordId, repairType, description, repairDate, repairedBy, cost, status, notes } = req.body;
+
+  if (!repairType || !String(repairType).trim()) {
+    res.status(400).json({ error: '维修类型不能为空' });
+    return;
+  }
+  if (!description || !String(description).trim()) {
+    res.status(400).json({ error: '维修描述不能为空' });
+    return;
+  }
+
+  const finalRepairDate = repairDate || new Date().toISOString().split('T')[0];
+  if (!isDateValid(String(finalRepairDate))) {
+    res.status(400).json({ error: '维修日期格式无效' });
+    return;
+  }
+
+  const finalStatus = status && isValidRepairStatus(String(status)) ? status as RepairStatus : '待处理';
+
+  if (damageRecordId) {
+    const damage = profile.damageRecords.find(d => d.id === String(damageRecordId));
+    if (!damage) {
+      res.status(404).json({ error: '关联的损耗记录不存在' });
+      return;
+    }
+  }
+
+  const now = new Date().toISOString();
+  const newRepair: RepairRecord = {
+    id: uuidv4(),
+    bookId: profile.bookId,
+    bookTitle: profile.bookTitle,
+    damageRecordId: damageRecordId ? String(damageRecordId) : undefined,
+    repairType: String(repairType).trim(),
+    description: String(description).trim(),
+    repairDate: String(finalRepairDate),
+    repairedBy: repairedBy ? String(repairedBy).trim() : undefined,
+    cost: cost !== undefined ? Number(cost) : undefined,
+    status: finalStatus,
+    notes: notes ? String(notes).trim() : undefined,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  profile.repairRecords.unshift(newRepair);
+
+  const threeDaysLater = new Date();
+  threeDaysLater.setDate(threeDaysLater.getDate() + 3);
+  if (finalStatus !== '已完成' && finalStatus !== '无法修复') {
+    const existingReminder = profile.reminders.find(
+      r => r.type === '维修跟进' && !r.isCompleted
+    );
+    if (!existingReminder) {
+      profile.reminders.push({
+        id: uuidv4(),
+        bookId: profile.bookId,
+        bookTitle: profile.bookTitle,
+        type: '维修跟进',
+        title: `${newRepair.repairType}进度跟进`,
+        description: `请检查维修进度`,
+        scheduledDate: formatDate(threeDaysLater),
+        isCompleted: false,
+        priority: 'medium',
+        createdAt: now,
+        updatedAt: now
+      });
+    }
+  }
+
+  profile.updatedAt = now;
+  res.status(201).json(newRepair);
+});
+
+router.patch('/care/repairs/:repairId/status', (req, res) => {
+  const { status } = req.body;
+  if (!status || !isValidRepairStatus(String(status))) {
+    res.status(400).json({ error: '无效的维修状态' });
+    return;
+  }
+
+  let found = false;
+  let updatedRepair: RepairRecord | null = null;
+
+  for (const profile of bookCareProfiles) {
+    const repairIndex = profile.repairRecords.findIndex(r => r.id === req.params.repairId);
+    if (repairIndex !== -1) {
+      const repair = profile.repairRecords[repairIndex];
+      const oldStatus = repair.status;
+      repair.status = status as RepairStatus;
+      repair.updatedAt = new Date().toISOString();
+      updatedRepair = repair;
+      found = true;
+
+      if (repair.damageRecordId && (status === '已完成' || status === '无法修复')) {
+        const damage = profile.damageRecords.find(d => d.id === repair.damageRecordId);
+        if (damage && !damage.resolved) {
+          damage.resolved = true;
+          damage.resolvedAt = new Date().toISOString();
+          damage.resolutionNote = status === '已完成' ? `维修完成：${repair.repairType}` : '无法修复';
+          damage.updatedAt = new Date().toISOString();
+        }
+      }
+
+      if ((oldStatus === '待处理' || oldStatus === '处理中') && (status === '已完成' || status === '无法修复')) {
+        for (const rem of profile.reminders) {
+          if (rem.type === '维修跟进' && !rem.isCompleted) {
+            rem.isCompleted = true;
+            rem.completedAt = new Date().toISOString();
+            rem.updatedAt = new Date().toISOString();
+          }
+        }
+      }
+
+      const book = books.find(b => b.id === profile.bookId);
+      if (book) {
+        const unresolvedDamages = profile.damageRecords.filter(d => !d.resolved);
+        const riskResult = calculateDamageRiskLevel(
+          book, profile.totalBorrowCount, profile.totalReadCount,
+          unresolvedDamages, profile.isCirculationPaused
+        );
+        profile.damageRiskLevel = riskResult.level;
+        profile.damageRiskReasons = riskResult.reasons;
+        profile.currentCondition = calculateBookCondition(
+          unresolvedDamages, profile.totalBorrowCount, profile.totalReadCount
+        );
+      }
+      profile.updatedAt = new Date().toISOString();
+      break;
+    }
+  }
+
+  if (!found) {
+    res.status(404).json({ error: '维修记录不存在' });
+    return;
+  }
+
+  res.json(updatedRepair);
+});
+
+router.get('/care/reminders', (req, res) => {
+  const { isCompleted, type, priority, overdue } = req.query;
+  let allReminders: (CareReminder & { profile?: BookCareProfile })[] = [];
+
+  for (const profile of bookCareProfiles) {
+    for (const rem of profile.reminders) {
+      allReminders.push({ ...rem, profile });
+    }
+  }
+
+  if (isCompleted !== undefined) {
+    const wantCompleted = String(isCompleted) === 'true';
+    allReminders = allReminders.filter(r => r.isCompleted === wantCompleted);
+  }
+  if (type) {
+    allReminders = allReminders.filter(r => r.type === type);
+  }
+  if (priority) {
+    allReminders = allReminders.filter(r => r.priority === priority);
+  }
+  if (overdue === 'true') {
+    const today = new Date().toISOString().split('T')[0];
+    allReminders = allReminders.filter(r => !r.isCompleted && r.scheduledDate < today);
+  }
+
+  allReminders.sort((a, b) => {
+    const priorityOrder: Record<string, number> = { high: 3, medium: 2, low: 1 };
+    if (a.isCompleted !== b.isCompleted) return a.isCompleted ? 1 : -1;
+    if ((priorityOrder[b.priority] || 0) !== (priorityOrder[a.priority] || 0)) {
+      return (priorityOrder[b.priority] || 0) - (priorityOrder[a.priority] || 0);
+    }
+    return a.scheduledDate.localeCompare(b.scheduledDate);
+  });
+
+  res.json(allReminders.map(r => {
+    const { profile, ...rest } = r;
+    return rest;
+  }));
+});
+
+router.patch('/care/reminders/:reminderId/complete', (req, res) => {
+  let found = false;
+  let updatedReminder: CareReminder | null = null;
+
+  for (const profile of bookCareProfiles) {
+    const remIndex = profile.reminders.findIndex(r => r.id === req.params.reminderId);
+    if (remIndex !== -1) {
+      const reminder = profile.reminders[remIndex];
+      if (reminder.isCompleted) {
+        res.status(400).json({ error: '该提醒已完成' });
+        return;
+      }
+      reminder.isCompleted = true;
+      reminder.completedAt = new Date().toISOString();
+      reminder.updatedAt = new Date().toISOString();
+      updatedReminder = reminder;
+      found = true;
+
+      if (reminder.type === '清洁消毒') {
+        profile.lastCleanDate = new Date().toISOString().split('T')[0];
+        const nextMonth = new Date();
+        nextMonth.setDate(nextMonth.getDate() + 30);
+        profile.reminders.push({
+          id: uuidv4(),
+          bookId: profile.bookId,
+          bookTitle: profile.bookTitle,
+          type: '清洁消毒',
+          title: '定期清洁消毒提醒',
+          description: '建议对绘本进行清洁消毒',
+          scheduledDate: formatDate(nextMonth),
+          isCompleted: false,
+          priority: 'medium',
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+      }
+
+      profile.updatedAt = new Date().toISOString();
+      break;
+    }
+  }
+
+  if (!found) {
+    res.status(404).json({ error: '提醒不存在' });
+    return;
+  }
+
+  res.json(updatedReminder);
+});
+
+router.get('/care/stats', (req, res) => {
+  const totalProfiles = bookCareProfiles.length;
+  const highRiskCount = bookCareProfiles.filter(p => p.damageRiskLevel === '高' || p.damageRiskLevel === '极高').length;
+  const pausedCount = bookCareProfiles.filter(p => p.isCirculationPaused).length;
+
+  let pendingDamagesCount = 0;
+  let pendingRepairsCount = 0;
+  let pendingCleaningCount = 0;
+  let overdueRemindersCount = 0;
+  const today = new Date().toISOString().split('T')[0];
+
+  const conditionMap: Record<string, number> = {};
+  const riskMap: Record<string, number> = {};
+  const damageTypeMap: Record<string, number> = {};
+  const themeDamageMap: Record<string, number> = {};
+
+  for (const profile of bookCareProfiles) {
+    conditionMap[profile.currentCondition] = (conditionMap[profile.currentCondition] || 0) + 1;
+    riskMap[profile.damageRiskLevel] = (riskMap[profile.damageRiskLevel] || 0) + 1;
+
+    const book = books.find(b => b.id === profile.bookId);
+
+    for (const dmg of profile.damageRecords) {
+      if (!dmg.resolved) {
+        pendingDamagesCount++;
+        damageTypeMap[dmg.damageType] = (damageTypeMap[dmg.damageType] || 0) + 1;
+        if (book) {
+          themeDamageMap[book.theme] = (themeDamageMap[book.theme] || 0) + 1;
+        }
+      }
+    }
+
+    for (const repair of profile.repairRecords) {
+      if (repair.status === '待处理' || repair.status === '处理中') {
+        pendingRepairsCount++;
+      }
+    }
+
+    for (const rem of profile.reminders) {
+      if (!rem.isCompleted) {
+        if (rem.type === '清洁消毒') pendingCleaningCount++;
+        if (rem.scheduledDate < today) overdueRemindersCount++;
+      }
+    }
+  }
+
+  const conditionDistribution = bookConditions.map(c => ({ condition: c, count: conditionMap[c] || 0 }));
+  const riskDistribution = damageRiskLevels.map(r => ({ risk: r, count: riskMap[r] || 0 }));
+  const damageTypeDistribution = Object.entries(damageTypeMap)
+    .map(([type, count]) => ({ type: type as DamageType, count }))
+    .sort((a, b) => b.count - a.count);
+  const themeDamageDistribution = Object.entries(themeDamageMap)
+    .map(([theme, count]) => ({ theme: theme as BookTheme, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const stats: CareStats = {
+    totalProfiles,
+    highRiskCount,
+    pausedCount,
+    pendingDamagesCount,
+    pendingRepairsCount,
+    pendingCleaningCount,
+    overdueRemindersCount,
+    conditionDistribution,
+    riskDistribution,
+    damageTypeDistribution,
+    themeDamageDistribution
+  };
+
+  res.json(stats);
 });
 
 export default router;

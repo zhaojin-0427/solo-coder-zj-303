@@ -1,29 +1,43 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { recommendApi, babyApi, rotationApi, assessmentApi } from '@/api'
-import type { Recommendation, BabyInfo, RotationPlanStats, AssessmentOverview } from '@/types'
+import { recommendApi, babyApi, rotationApi, assessmentApi, careApi } from '@/api'
+import type { Recommendation, BabyInfo, RotationPlanStats, AssessmentOverview, BookCareProfile, DamageRiskLevel } from '@/types'
 
 const recommendations = ref<Recommendation[]>([])
 const babyInfo = ref<BabyInfo | null>(null)
 const themePreferences = ref<{ theme: string; count: number }[]>([])
 const rotationStats = ref<RotationPlanStats | null>(null)
 const assessmentOverview = ref<AssessmentOverview | null>(null)
+const careProfiles = ref<BookCareProfile[]>([])
 const loading = ref(false)
+
+const riskColors: Record<DamageRiskLevel, string> = {
+  '低': '#52c41a',
+  '中': '#faad14',
+  '高': '#fa541c',
+  '极高': '#f5222d'
+}
+
+const getCareProfile = (bookId: string) => {
+  return careProfiles.value.find(p => p.bookId === bookId)
+}
 
 const loadData = async () => {
   loading.value = true
   try {
-    const [info, rec, stats, overview] = await Promise.all([
+    const [info, rec, stats, overview, profiles] = await Promise.all([
       babyApi.getInfo(),
       recommendApi.getRecommendations(),
       rotationApi.getStats().catch(() => null),
-      assessmentApi.getOverview().catch(() => null)
+      assessmentApi.getOverview().catch(() => null),
+      careApi.getProfiles().catch(() => [])
     ])
     babyInfo.value = info
     recommendations.value = rec.recommendations
     themePreferences.value = rec.themePreferences
     rotationStats.value = stats
     assessmentOverview.value = overview
+    careProfiles.value = profiles
   } catch (e) {
     console.error('加载推荐数据失败', e)
   } finally {
@@ -162,6 +176,19 @@ onMounted(() => {
             <span class="meta-item">📚 {{ rec.book.theme }}</span>
             <span class="meta-item">👶 {{ rec.book.minMonth }}-{{ rec.book.maxMonth }}月</span>
             <span class="meta-item">🎮 {{ rec.book.interactionType }}</span>
+            <span
+              v-if="getCareProfile(rec.bookId)"
+              class="meta-item risk-badge"
+              :style="{ color: riskColors[getCareProfile(rec.bookId)!.damageRiskLevel], borderColor: riskColors[getCareProfile(rec.bookId)!.damageRiskLevel] }"
+            >
+              风险：{{ getCareProfile(rec.bookId)!.damageRiskLevel }}
+            </span>
+          </div>
+          <div
+            v-if="getCareProfile(rec.bookId) && (getCareProfile(rec.bookId)!.damageRiskLevel === '高' || getCareProfile(rec.bookId)!.damageRiskLevel === '极高' || getCareProfile(rec.bookId)!.isCirculationPaused)"
+            class="high-risk-warning"
+          >
+            🚫 高风险/暂停流转，暂不推荐外借
           </div>
           <div class="rec-reasons">
             <span class="reasons-label">推荐理由：</span>
@@ -496,6 +523,25 @@ onMounted(() => {
 .meta-item {
   font-size: 13px;
   color: #888;
+}
+
+.meta-item.risk-badge {
+  padding: 2px 10px;
+  border-radius: 12px;
+  border: 1px solid;
+  font-weight: 500;
+  font-size: 12px;
+}
+
+.high-risk-warning {
+  background: #fff2f0;
+  color: #ff4d4f;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 10px;
+  border: 1px solid #ffccc7;
 }
 
 .rec-reasons {

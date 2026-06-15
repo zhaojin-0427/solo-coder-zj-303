@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { sharingApi, bookApi, metaApi, assessmentApi } from '@/api'
+import { sharingApi, bookApi, metaApi, assessmentApi, careApi } from '@/api'
 import type {
   SharingCircle,
   SharedBook,
@@ -10,7 +10,8 @@ import type {
   Book,
   SharedBookBorrowStatus,
   ExchangeInvitationStatus,
-  AssessmentOverview
+  AssessmentOverview,
+  BookCareProfile
 } from '@/types'
 import { getLocalDateString } from '@/utils/date'
 
@@ -25,6 +26,7 @@ const interactionTypes = ref<InteractionType[]>([])
 const currentUserId = ref('')
 const currentUserName = ref('')
 const assessmentOverview = ref<AssessmentOverview | null>(null)
+const careProfiles = ref<BookCareProfile[]>([])
 
 const activeTab = ref<'books' | 'invitations'>('books')
 const invitationTab = ref<'sent' | 'received'>('received')
@@ -81,12 +83,13 @@ const inviteStatusColors: Record<ExchangeInvitationStatus, string> = {
 const loadAll = async () => {
   loading.value = true
   try {
-    const [u, c, t, it, bs] = await Promise.all([
+    const [u, c, t, it, bs, cps] = await Promise.all([
       sharingApi.getCurrentUser(),
       sharingApi.getCircles(),
       metaApi.getThemes() as Promise<BookTheme[]>,
       metaApi.getInteractionTypes() as Promise<InteractionType[]>,
-      bookApi.getList({ status: '在家' })
+      bookApi.getList({ status: '在家' }),
+      careApi.getProfiles()
     ])
     currentUserId.value = u.userId
     currentUserName.value = u.userName
@@ -94,6 +97,7 @@ const loadAll = async () => {
     themes.value = t
     interactionTypes.value = it
     myBooks.value = bs
+    careProfiles.value = cps
     if (c.length > 0) {
       filterCircle.value = c[0].id
       addBookForm.value.circleId = c[0].id
@@ -165,6 +169,11 @@ const pendingReceivedCount = computed(() =>
 const pendingSentCount = computed(() =>
   sentInvitations.value.filter(e => e.status === '待确认').length
 )
+
+const isBookBlocked = (bookId: string) => {
+  const profile = careProfiles.value.find(p => p.bookId === bookId)
+  return !!(profile && (profile.isCirculationPaused || profile.damageRiskLevel === '极高'))
+}
 
 const availableBooksToShare = computed(() => {
   const sharedBookIds = mySharedBooks.value.map(sb => sb.bookId)
@@ -255,6 +264,7 @@ const addSharedBook = async () => {
   const f = addBookForm.value
   if (!f.circleId) { alert('请选择共享圈'); return }
   if (!f.bookId) { alert('请选择绘本'); return }
+  if (isBookBlocked(f.bookId)) { alert('该绘本已暂停流转或风险极高，暂不可共享'); return }
   try {
     await sharingApi.addSharedBook({
       circleId: f.circleId,
@@ -292,6 +302,10 @@ const openExchangeModal = (targetBook: SharedBook) => {
     alert('该绘本当前不可借，无法发起邀约')
     return
   }
+  if (isBookBlocked(targetBook.bookId)) {
+    alert('该绘本已暂停流转或风险极高，暂不可换书')
+    return
+  }
   if (myAvailableSharedBooks.value.length === 0) {
     alert('您暂无可交换的共享绘本，请先添加可借的共享绘本')
     return
@@ -314,6 +328,16 @@ const createExchange = async () => {
   if (!f.expectedExchangeDate) { alert('请选择期望交换时间'); return }
   if (f.targetBookId === f.offeredBookId) {
     alert('目标绘本和拟交换绘本不能相同')
+    return
+  }
+  const targetSb = sharedBooks.value.find(s => s.id === f.targetBookId)
+  if (targetSb && isBookBlocked(targetSb.bookId)) {
+    alert('目标绘本已暂停流转或风险极高，暂不可换书')
+    return
+  }
+  const offeredSb = mySharedBooks.value.find(s => s.id === f.offeredBookId)
+  if (offeredSb && isBookBlocked(offeredSb.bookId)) {
+    alert('拟交换绘本已暂停流转或风险极高，暂不可换书')
     return
   }
   try {
@@ -495,12 +519,15 @@ onMounted(() => {
           <div class="book-body">
             <div class="book-header">
               <h3 class="book-title" :title="sb.book.title">{{ sb.book.title }}</h3>
-              <span
-                class="status-badge"
-                :style="{ backgroundColor: statusColors[sb.borrowStatus] + '20', color: statusColors[sb.borrowStatus] }"
-              >
-                {{ sb.borrowStatus }}
-              </span>
+              <div class="badges-row">
+                <span v-if="isBookBlocked(sb.bookId)" class="blocked-badge">🚫 暂停/极高风险</span>
+                <span
+                  class="status-badge"
+                  :style="{ backgroundColor: statusColors[sb.borrowStatus] + '20', color: statusColors[sb.borrowStatus] }"
+                >
+                  {{ sb.borrowStatus }}
+                </span>
+              </div>
             </div>
             <div class="book-meta">
               <span class="author">作者：{{ sb.book.author }}</span>
@@ -578,13 +605,19 @@ onMounted(() => {
             <div class="inv-swap-row">
               <div class="inv-book-block">
                 <div class="inv-label">发起人：{{ inv.initiatorName }}</div>
-                <div class="inv-book-title">拟交换：《{{ inv.offeredBook.book.title }}》</div>
+                <div class="inv-book-title-line">
+                  <span class="inv-book-title">拟交换：《{{ inv.offeredBook.book.title }}》</span>
+                  <span v-if="isBookBlocked(inv.offeredBook.bookId)" class="blocked-badge-sm">🚫 暂停/极高风险</span>
+                </div>
                 <div class="inv-book-meta">{{ inv.offeredBook.book.theme }} · {{ inv.offeredBook.book.minMonth }}-{{ inv.offeredBook.book.maxMonth }}月</div>
               </div>
               <div class="inv-arrow">↔️</div>
               <div class="inv-book-block">
                 <div class="inv-label">我需要出：</div>
-                <div class="inv-book-title">《{{ inv.targetBook.book.title }}》</div>
+                <div class="inv-book-title-line">
+                  <span class="inv-book-title">《{{ inv.targetBook.book.title }}》</span>
+                  <span v-if="isBookBlocked(inv.targetBook.bookId)" class="blocked-badge-sm">🚫 暂停/极高风险</span>
+                </div>
                 <div class="inv-book-meta">{{ inv.targetBook.book.theme }} · {{ inv.targetBook.book.minMonth }}-{{ inv.targetBook.book.maxMonth }}月</div>
               </div>
             </div>
@@ -620,13 +653,19 @@ onMounted(() => {
             <div class="inv-swap-row">
               <div class="inv-book-block">
                 <div class="inv-label">我要换：</div>
-                <div class="inv-book-title">《{{ inv.targetBook.book.title }}》</div>
+                <div class="inv-book-title-line">
+                  <span class="inv-book-title">《{{ inv.targetBook.book.title }}》</span>
+                  <span v-if="isBookBlocked(inv.targetBook.bookId)" class="blocked-badge-sm">🚫 暂停/极高风险</span>
+                </div>
                 <div class="inv-book-meta">归属：{{ inv.targetBook.ownerName }}</div>
               </div>
               <div class="inv-arrow">↔️</div>
               <div class="inv-book-block">
                 <div class="inv-label">我出：</div>
-                <div class="inv-book-title">《{{ inv.offeredBook.book.title }}》</div>
+                <div class="inv-book-title-line">
+                  <span class="inv-book-title">《{{ inv.offeredBook.book.title }}》</span>
+                  <span v-if="isBookBlocked(inv.offeredBook.bookId)" class="blocked-badge-sm">🚫 暂停/极高风险</span>
+                </div>
                 <div class="inv-book-meta">{{ inv.offeredBook.book.theme }} · {{ inv.offeredBook.book.minMonth }}-{{ inv.offeredBook.book.maxMonth }}月</div>
               </div>
             </div>
@@ -723,7 +762,7 @@ onMounted(() => {
             <select v-model="addBookForm.bookId">
               <option value="">请选择要共享的绘本</option>
               <option v-for="b in availableBooksToShare" :key="b.id" :value="b.id">
-                《{{ b.title }}》 - {{ b.theme }} ({{ b.minMonth }}-{{ b.maxMonth }}月)
+                《{{ b.title }}》 - {{ b.theme }} ({{ b.minMonth }}-{{ b.maxMonth }}月){{ isBookBlocked(b.id) ? '（暂停/极高风险，暂不可共享）' : '' }}
               </option>
             </select>
             <div v-if="availableBooksToShare.length === 0" class="form-tip">
@@ -1045,6 +1084,43 @@ onMounted(() => {
   align-items: flex-start;
   gap: 8px;
   margin-bottom: 4px;
+}
+
+.badges-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.blocked-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 500;
+  background: #fff1f0;
+  color: #ff4d4f;
+  border: 1px solid #ffa39e;
+  white-space: nowrap;
+}
+
+.blocked-badge-sm {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-weight: 500;
+  background: #fff1f0;
+  color: #ff4d4f;
+  border: 1px solid #ffa39e;
+  white-space: nowrap;
+  margin-left: 4px;
+}
+
+.inv-book-title-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .book-title {
