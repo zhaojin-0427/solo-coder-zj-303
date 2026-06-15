@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { statsApi, rotationApi } from '@/api'
-import type { Statistics, RotationPlanStats } from '@/types'
+import { statsApi, rotationApi, assessmentApi } from '@/api'
+import type { Statistics, RotationPlanStats, AssessmentOverview } from '@/types'
 
 const router = useRouter()
 import VChart from 'vue-echarts'
@@ -29,17 +29,20 @@ use([
 
 const stats = ref<Statistics | null>(null)
 const rotationStats = ref<RotationPlanStats | null>(null)
+const assessmentOverview = ref<AssessmentOverview | null>(null)
 const loading = ref(false)
 
 const loadStats = async () => {
   loading.value = true
   try {
-    const [s, rs] = await Promise.all([
+    const [s, rs, ao] = await Promise.all([
       statsApi.getStatistics(),
-      rotationApi.getStats().catch(() => null)
+      rotationApi.getStats().catch(() => null),
+      assessmentApi.getOverview().catch(() => null)
     ])
     stats.value = s
     rotationStats.value = rs
+    assessmentOverview.value = ao
   } catch (e) {
     console.error('加载统计数据失败', e)
   } finally {
@@ -287,6 +290,30 @@ onMounted(() => {
         <span class="pending-sub">点击前往「共享换书」页面查看处理</span>
       </div>
       <span class="pending-arrow">→</span>
+    </div>
+
+    <div v-if="assessmentOverview && assessmentOverview.hasReport" class="assessment-alert-card">
+      <div class="assessment-alert-header">
+        <span class="assessment-icon">🌟</span>
+        <span class="assessment-title">成长评估命中</span>
+        <router-link to="/assessment" class="go-assessment-link">查看详情 →</router-link>
+      </div>
+      <div class="assessment-alert-content">
+        <span class="assessment-score" :style="{ color: assessmentOverview.latestScore >= 85 ? '#52c41a' : assessmentOverview.latestScore >= 65 ? '#1890ff' : assessmentOverview.latestScore >= 40 ? '#faad14' : '#ff4d4f' }">{{ assessmentOverview.latestScore }}分</span>
+        <span class="assessment-level">{{ assessmentOverview.latestLevel }}</span>
+        <span v-if="assessmentOverview.activeAlerts > 0" class="assessment-alert-count">{{ assessmentOverview.activeAlerts }}项需关注</span>
+        <span v-if="assessmentOverview.pendingInterventions > 0" class="assessment-intervention-count">{{ assessmentOverview.pendingInterventions }}条待执行建议</span>
+      </div>
+      <div v-if="assessmentOverview.dimensions" class="assessment-dim-tags">
+        <span
+          v-for="dim in assessmentOverview.dimensions.filter(d => d.level === '需关注' || d.level === '一般')"
+          :key="dim.key"
+          class="dim-tag"
+          :class="dim.level"
+        >
+          {{ dim.label }}: {{ dim.level }}
+        </span>
+      </div>
     </div>
 
     <div v-if="rotationStats && rotationStats.hasPlan" class="rotation-stats-cards">
@@ -745,5 +772,98 @@ onMounted(() => {
   .charts-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.assessment-alert-card {
+  background: white;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border-left: 4px solid #764ba2;
+}
+
+.assessment-alert-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.assessment-icon {
+  font-size: 20px;
+}
+
+.assessment-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+  flex: 1;
+}
+
+.go-assessment-link {
+  font-size: 13px;
+  color: #764ba2;
+  font-weight: 500;
+}
+
+.go-assessment-link:hover {
+  text-decoration: underline;
+}
+
+.assessment-alert-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.assessment-score {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.assessment-level {
+  font-size: 13px;
+  color: #666;
+}
+
+.assessment-alert-count {
+  font-size: 12px;
+  padding: 2px 8px;
+  background: #fff2f0;
+  color: #ff4d4f;
+  border-radius: 10px;
+}
+
+.assessment-intervention-count {
+  font-size: 12px;
+  padding: 2px 8px;
+  background: #fffbe6;
+  color: #fa8c16;
+  border-radius: 10px;
+}
+
+.assessment-dim-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.dim-tag {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 10px;
+}
+
+.dim-tag.需关注 {
+  background: #fff2f0;
+  color: #ff4d4f;
+}
+
+.dim-tag.一般 {
+  background: #fffbe6;
+  color: #faad14;
 }
 </style>

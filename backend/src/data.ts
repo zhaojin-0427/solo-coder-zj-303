@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Book, BorrowRecord, ReadingRecord, BabyInfo, BookTheme, InteractionType, RotationPlan, SharingCircle, SharedBook, ExchangeInvitation } from './types';
+import { Book, BorrowRecord, ReadingRecord, BabyInfo, BookTheme, InteractionType, RotationPlan, SharingCircle, SharedBook, ExchangeInvitation, AssessmentReport } from './types';
 
 export const babyInfo: BabyInfo = {
   name: '小宝',
@@ -391,3 +391,5 @@ export let exchangeInvitations: ExchangeInvitation[] = [
     updatedAt: '2025-06-12T00:00:00.000Z'
   }
 ];
+
+export let assessmentReports: AssessmentReport[] = [];

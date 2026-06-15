@@ -13,7 +13,10 @@ import type {
   SharingCircle,
   SharedBook,
   ExchangeInvitation,
-  BookTheme
+  BookTheme,
+  AssessmentReport,
+  AssessmentOverview,
+  AssessmentPeriodType
 } from '@/types';
 
 const api = axios.create({
@@ -151,4 +154,27 @@ export const sharingApi = {
 
   getCurrentUser: () =>
     api.get<{ userId: string; userName: string }>('/sharing/current-user').then(r => r.data)
+};
+
+export const assessmentApi = {
+  generate: (data: { periodType: AssessmentPeriodType; periodStart?: string; periodEnd?: string }) =>
+    api.post<AssessmentReport>('/assessments/generate', data).then(r => r.data),
+  getList: (params?: { periodType?: string; status?: string }) =>
+    api.get<AssessmentReport[]>('/assessments', { params }).then(r => r.data),
+  getLatest: () =>
+    api.get<AssessmentReport>('/assessments/latest').then(r => r.data),
+  getDetail: (id: string) =>
+    api.get<AssessmentReport>(`/assessments/${id}`).then(r => r.data),
+  lock: (id: string) =>
+    api.patch<AssessmentReport>(`/assessments/${id}/lock`).then(r => r.data),
+  addNote: (id: string, note: string) =>
+    api.patch<AssessmentReport>(`/assessments/${id}/notes`, { note }).then(r => r.data),
+  updateNote: (id: string, noteIndex: number, note: string) =>
+    api.patch<AssessmentReport>(`/assessments/${id}/notes/${noteIndex}`, { note }).then(r => r.data),
+  deleteNote: (id: string, noteIndex: number) =>
+    api.delete<AssessmentReport>(`/assessments/${id}/notes/${noteIndex}`).then(r => r.data),
+  updateInterventionStatus: (id: string, interventionIndex: number, status: string) =>
+    api.patch<AssessmentReport>(`/assessments/${id}/interventions/${interventionIndex}/status`, { status }).then(r => r.data),
+  getOverview: () =>
+    api.get<AssessmentOverview>('/assessments/summary/overview').then(r => r.data)
 };

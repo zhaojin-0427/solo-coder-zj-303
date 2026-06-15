@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { readingApi, bookApi, babyApi, rotationApi } from '@/api'
-import type { ReadingRecord, Book, BabyInfo, RotationPlanStats } from '@/types'
+import { readingApi, bookApi, babyApi, rotationApi, assessmentApi } from '@/api'
+import type { ReadingRecord, Book, BabyInfo, RotationPlanStats, AssessmentOverview } from '@/types'
 import { getLocalDateString } from '@/utils/date'
 
 const records = ref<ReadingRecord[]>([])
 const books = ref<Book[]>([])
 const babyInfo = ref<BabyInfo | null>(null)
 const rotationStats = ref<RotationPlanStats | null>(null)
+const assessmentOverview = ref<AssessmentOverview | null>(null)
 const loading = ref(false)
 
 const showModal = ref(false)
@@ -22,16 +23,18 @@ const newRecord = ref({
 const loadData = async () => {
   loading.value = true
   try {
-    const [recs, bks, baby, stats] = await Promise.all([
+    const [recs, bks, baby, stats, assessment] = await Promise.all([
       readingApi.getList(),
       bookApi.getList(),
       babyApi.getInfo(),
-      rotationApi.getStats().catch(() => null)
+      rotationApi.getStats().catch(() => null),
+      assessmentApi.getOverview().catch(() => null)
     ])
     records.value = recs
     books.value = bks
     babyInfo.value = baby
     rotationStats.value = stats
+    assessmentOverview.value = assessment
   } catch (e) {
     console.error('加载数据失败', e)
   } finally {
@@ -175,6 +178,20 @@ onMounted(() => {
         <router-link to="/rotation" class="go-rotation-link">
           查看详情 →
         </router-link>
+      </div>
+    </div>
+
+    <div v-if="assessmentOverview && assessmentOverview.hasReport" class="assessment-alert-card">
+      <div class="assessment-alert-header">
+        <span class="assessment-icon">🌟</span>
+        <span class="assessment-title">成长评估命中</span>
+        <router-link to="/assessment" class="go-assessment-link">查看详情 →</router-link>
+      </div>
+      <div class="assessment-alert-content">
+        <span class="assessment-score" :style="{ color: assessmentOverview.latestScore >= 85 ? '#52c41a' : assessmentOverview.latestScore >= 65 ? '#1890ff' : assessmentOverview.latestScore >= 40 ? '#faad14' : '#ff4d4f' }">{{ assessmentOverview.latestScore }}分</span>
+        <span class="assessment-level">{{ assessmentOverview.latestLevel }}</span>
+        <span v-if="assessmentOverview.activeAlerts > 0" class="assessment-alert-count">{{ assessmentOverview.activeAlerts }}项需关注</span>
+        <span v-if="assessmentOverview.pendingInterventions > 0" class="assessment-intervention-count">{{ assessmentOverview.pendingInterventions }}条待执行建议</span>
       </div>
     </div>
 
@@ -694,5 +711,75 @@ onMounted(() => {
   gap: 10px;
   padding: 16px 24px;
   border-top: 1px solid #f0f0f0;
+}
+
+.assessment-alert-card {
+  background: white;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border-left: 4px solid #764ba2;
+}
+
+.assessment-alert-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.assessment-icon {
+  font-size: 20px;
+}
+
+.assessment-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+  flex: 1;
+}
+
+.go-assessment-link {
+  font-size: 13px;
+  color: #764ba2;
+  font-weight: 500;
+}
+
+.go-assessment-link:hover {
+  text-decoration: underline;
+}
+
+.assessment-alert-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.assessment-score {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.assessment-level {
+  font-size: 13px;
+  color: #666;
+}
+
+.assessment-alert-count {
+  font-size: 12px;
+  padding: 2px 8px;
+  background: #fff2f0;
+  color: #ff4d4f;
+  border-radius: 10px;
+}
+
+.assessment-intervention-count {
+  font-size: 12px;
+  padding: 2px 8px;
+  background: #fffbe6;
+  color: #fa8c16;
+  border-radius: 10px;
 }
 </style>

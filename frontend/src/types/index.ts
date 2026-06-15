@@ -211,3 +211,79 @@ export interface SharingStats {
   totalExchangesCount: number;
   completedExchangesCount: number;
 }
+
+export type AssessmentPeriodType = 'week' | 'month';
+export type AssessmentReportStatus = 'draft' | 'locked';
+
+export interface AssessmentDimensionScore {
+  key: string;
+  label: string;
+  score: number;
+  maxScore: number;
+  level: '优秀' | '良好' | '一般' | '需关注';
+  detail: string;
+}
+
+export interface AssessmentAlert {
+  type: 'warning' | 'danger' | 'info';
+  dimension: string;
+  message: string;
+}
+
+export interface InterventionSuggestion {
+  dimension: string;
+  priority: 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  actionType: string;
+  relatedBookIds: string[];
+  status: 'pending' | 'in_progress' | 'done';
+}
+
+export interface AssessmentSnapshot {
+  totalReadingRecords: number;
+  totalReadingDuration: number;
+  readingDays: number;
+  uniqueBooks: number;
+  themeDistribution: { theme: string; count: number }[];
+  interactionDistribution: { type: string; count: number }[];
+  ageMatchedCount: number;
+  ageMismatchedCount: number;
+  rotationCompletionRate: number;
+  exchangeCompletedCount: number;
+  exchangeTotalCount: number;
+  sharedBooksCount: number;
+}
+
+export interface AssessmentReport {
+  id: string;
+  periodType: AssessmentPeriodType;
+  periodStart: string;
+  periodEnd: string;
+  babyAgeMonths: number;
+  status: AssessmentReportStatus;
+  overallScore: number;
+  overallLevel: string;
+  dimensions: AssessmentDimensionScore[];
+  alerts: AssessmentAlert[];
+  interventions: InterventionSuggestion[];
+  relatedBookIds: string[];
+  parentNotes: string[];
+  snapshotData: AssessmentSnapshot;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssessmentOverview {
+  hasReport: boolean;
+  latestId?: string;
+  latestScore: number;
+  latestLevel: string;
+  latestPeriodType?: AssessmentPeriodType;
+  latestPeriodStart?: string;
+  latestPeriodEnd?: string;
+  reportCount: number;
+  activeAlerts: number;
+  pendingInterventions: number;
+  dimensions?: AssessmentDimensionScore[];
+}

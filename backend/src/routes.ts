@@ -2,13 +2,18 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import {
   books, borrowRecords, readingRecords, babyInfo, themes, interactionTypes, rotationPlans,
-  sharingCircles, sharedBooks, exchangeInvitations, CURRENT_USER_ID, CURRENT_USER_NAME
+  sharingCircles, sharedBooks, exchangeInvitations, CURRENT_USER_ID, CURRENT_USER_NAME, assessmentReports
 } from './data';
 import {
   Book, BookStatus, BorrowRecord, ReadingRecord, RotationPlan, RotationItemStatus, RotationPlanStats,
-  SharingCircle, SharedBook, ExchangeInvitation, ExchangeInvitationStatus, BookTheme, SharingStats
+  SharingCircle, SharedBook, ExchangeInvitation, ExchangeInvitationStatus, BookTheme, SharingStats,
+  AssessmentReport, AssessmentPeriodType, AssessmentReportStatus
 } from './types';
-import { recommendBooks, calculateBabyAgeMonths, isOverdue, getWeekRange, generateRotationPlanItems } from './utils';
+import { recommendBooks, calculateBabyAgeMonths, isOverdue, getWeekRange, generateRotationPlanItems,
+  calculateReadingStability, calculateThemeBalance, calculateAgeMatch, calculateInteractionParticipation,
+  calculateRotationCompletion, calculateExchangeExpansion, generateAlerts, generateInterventions,
+  buildSnapshot, getOverallLevel, getPeriodRange
+} from './utils';
 
 const router = Router();
 
@@ -1229,6 +1234,290 @@ router.get('/sharing/current-user', (req, res) => {
   res.json({
     userId: CURRENT_USER_ID,
     userName: CURRENT_USER_NAME
+  });
+});
+
+// ==================== 成长评估 API ====================
+
+router.post('/assessments/generate', (req, res) => {
+  const { periodType, periodStart, periodEnd } = req.body;
+
+  if (!periodType || !['week', 'month'].includes(periodType)) {
+    res.status(400).json({ error: 'periodType 必须为 week 或 month' });
+    return;
+  }
+
+  let start: string;
+  let end: string;
+
+  if (periodStart && periodEnd) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStart) || !/^\d{4}-\d{2}-\d{2}$/.test(periodEnd)) {
+      res.status(400).json({ error: '日期格式无效，需为 YYYY-MM-DD' });
+      return;
+    }
+    if (periodStart > periodEnd) {
+      res.status(400).json({ error: '起始日期不能晚于结束日期' });
+      return;
+    }
+    start = periodStart;
+    end = periodEnd;
+  } else {
+    const range = getPeriodRange(periodType as AssessmentPeriodType);
+    start = range.start;
+    end = range.end;
+  }
+
+  const existing = assessmentReports.find(r =>
+    r.periodType === periodType && r.periodStart === start && r.periodEnd === end && r.status === 'draft'
+  );
+  if (existing) {
+    res.status(400).json({ error: '该时段已有草稿状态的评估报告，请先查看或锁定后再生成新的' });
+    return;
+  }
+
+  const babyAge = calculateBabyAgeMonths(babyInfo.birthDate);
+  if (babyAge < 0 || babyAge > 144) {
+    res.status(400).json({ error: '宝宝月龄超出有效范围(0-144个月)' });
+    return;
+  }
+
+  const dimStability = calculateReadingStability(readingRecords, start, end);
+  const dimTheme = calculateThemeBalance(readingRecords, books, themes, start, end);
+  const dimAgeMatch = calculateAgeMatch(readingRecords, books, babyAge, start, end);
+  const dimInteraction = calculateInteractionParticipation(readingRecords, books, start, end);
+  const dimRotation = calculateRotationCompletion(rotationPlans, start, end);
+  const dimExchange = calculateExchangeExpansion(exchangeInvitations, sharedBooks, start, end);
+
+  const dimensions = [dimStability, dimTheme, dimAgeMatch, dimInteraction, dimRotation, dimExchange];
+  const overallScore = Math.round(dimensions.reduce((sum, d) => sum + d.score, 0) / dimensions.length);
+  const overallLevel = getOverallLevel(overallScore);
+
+  const alerts = generateAlerts(dimensions);
+
+  const themeDistribution = dimTheme.detail.includes('已覆盖')
+    ? readingRecords
+        .filter(r => r.readDate >= start && r.readDate <= end)
+        .reduce((acc: { theme: string; count: number }[], r) => {
+          const book = books.find(b => b.id === r.bookId);
+          if (book) {
+            const existing = acc.find(a => a.theme === book.theme);
+            if (existing) existing.count++;
+            else acc.push({ theme: book.theme, count: 1 });
+          }
+          return acc;
+        }, [])
+    : [];
+
+  const interventions = generateInterventions(dimensions, books, themes, babyAge, themeDistribution);
+
+  const relatedBookIds = [...new Set(
+    readingRecords
+      .filter(r => r.readDate >= start && r.readDate <= end)
+      .map(r => r.bookId)
+  )];
+
+  const rotationCompletionRate = dimRotation.score;
+  const exchangeCompletedCount = exchangeInvitations.filter(ei => ei.status === '已完成').length;
+  const exchangeTotalCount = exchangeInvitations.length;
+
+  const snapshotData = buildSnapshot(
+    readingRecords, books, themes, babyAge,
+    rotationCompletionRate, exchangeCompletedCount, exchangeTotalCount, sharedBooks.length,
+    start, end
+  );
+
+  const now = new Date().toISOString();
+  const report: AssessmentReport = {
+    id: uuidv4(),
+    periodType: periodType as AssessmentPeriodType,
+    periodStart: start,
+    periodEnd: end,
+    babyAgeMonths: babyAge,
+    status: 'draft',
+    overallScore,
+    overallLevel,
+    dimensions,
+    alerts,
+    interventions,
+    relatedBookIds,
+    parentNotes: [],
+    snapshotData,
+    createdAt: now,
+    updatedAt: now
+  };
+
+  assessmentReports.push(report);
+  res.status(201).json(report);
+});
+
+router.get('/assessments', (req, res) => {
+  const { periodType, status } = req.query;
+  let filtered = [...assessmentReports];
+
+  if (periodType) {
+    filtered = filtered.filter(r => r.periodType === periodType);
+  }
+  if (status) {
+    filtered = filtered.filter(r => r.status === status);
+  }
+
+  filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  res.json(filtered);
+});
+
+router.get('/assessments/latest', (req, res) => {
+  const latest = assessmentReports
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
+  if (!latest) {
+    res.status(404).json({ error: '暂无评估报告' });
+    return;
+  }
+  res.json(latest);
+});
+
+router.get('/assessments/:id', (req, res) => {
+  const report = assessmentReports.find(r => r.id === req.params.id);
+  if (!report) {
+    res.status(404).json({ error: '评估报告不存在' });
+    return;
+  }
+  res.json(report);
+});
+
+router.patch('/assessments/:id/lock', (req, res) => {
+  const report = assessmentReports.find(r => r.id === req.params.id);
+  if (!report) {
+    res.status(404).json({ error: '评估报告不存在' });
+    return;
+  }
+  if (report.status === 'locked') {
+    res.status(400).json({ error: '报告已锁定，不可重复锁定' });
+    return;
+  }
+
+  report.status = 'locked';
+  report.updatedAt = new Date().toISOString();
+  res.json(report);
+});
+
+router.patch('/assessments/:id/notes', (req, res) => {
+  const report = assessmentReports.find(r => r.id === req.params.id);
+  if (!report) {
+    res.status(404).json({ error: '评估报告不存在' });
+    return;
+  }
+
+  const { note } = req.body;
+  const noteText = String(note || '').trim();
+  if (!noteText) {
+    res.status(400).json({ error: '备注内容不能为空' });
+    return;
+  }
+
+  report.parentNotes.push(noteText);
+  report.updatedAt = new Date().toISOString();
+  res.json(report);
+});
+
+router.patch('/assessments/:id/notes/:noteIndex', (req, res) => {
+  const report = assessmentReports.find(r => r.id === req.params.id);
+  if (!report) {
+    res.status(404).json({ error: '评估报告不存在' });
+    return;
+  }
+
+  const idx = Number(req.params.noteIndex);
+  if (isNaN(idx) || idx < 0 || idx >= report.parentNotes.length) {
+    res.status(400).json({ error: '备注索引无效' });
+    return;
+  }
+
+  const { note } = req.body;
+  const noteText = String(note || '').trim();
+  if (!noteText) {
+    res.status(400).json({ error: '备注内容不能为空' });
+    return;
+  }
+
+  report.parentNotes[idx] = noteText;
+  report.updatedAt = new Date().toISOString();
+  res.json(report);
+});
+
+router.delete('/assessments/:id/notes/:noteIndex', (req, res) => {
+  const report = assessmentReports.find(r => r.id === req.params.id);
+  if (!report) {
+    res.status(404).json({ error: '评估报告不存在' });
+    return;
+  }
+
+  const idx = Number(req.params.noteIndex);
+  if (isNaN(idx) || idx < 0 || idx >= report.parentNotes.length) {
+    res.status(400).json({ error: '备注索引无效' });
+    return;
+  }
+
+  report.parentNotes.splice(idx, 1);
+  report.updatedAt = new Date().toISOString();
+  res.json(report);
+});
+
+router.patch('/assessments/:id/interventions/:interventionIndex/status', (req, res) => {
+  const report = assessmentReports.find(r => r.id === req.params.id);
+  if (!report) {
+    res.status(404).json({ error: '评估报告不存在' });
+    return;
+  }
+
+  const idx = Number(req.params.interventionIndex);
+  if (isNaN(idx) || idx < 0 || idx >= report.interventions.length) {
+    res.status(400).json({ error: '干预建议索引无效' });
+    return;
+  }
+
+  const { status } = req.body;
+  if (!['pending', 'in_progress', 'done'].includes(status)) {
+    res.status(400).json({ error: '状态必须为 pending、in_progress 或 done' });
+    return;
+  }
+
+  report.interventions[idx].status = status;
+  report.updatedAt = new Date().toISOString();
+  res.json(report);
+});
+
+router.get('/assessments/summary/overview', (req, res) => {
+  const latest = assessmentReports
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+
+  if (!latest) {
+    res.json({
+      hasReport: false,
+      latestScore: 0,
+      latestLevel: '',
+      reportCount: 0,
+      activeAlerts: 0,
+      pendingInterventions: 0
+    });
+    return;
+  }
+
+  const activeAlerts = latest.alerts.length;
+  const pendingInterventions = latest.interventions.filter(i => i.status === 'pending').length;
+
+  res.json({
+    hasReport: true,
+    latestId: latest.id,
+    latestScore: latest.overallScore,
+    latestLevel: latest.overallLevel,
+    latestPeriodType: latest.periodType,
+    latestPeriodStart: latest.periodStart,
+    latestPeriodEnd: latest.periodEnd,
+    reportCount: assessmentReports.length,
+    activeAlerts,
+    pendingInterventions,
+    dimensions: latest.dimensions
   });
 });
 

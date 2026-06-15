@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { sharingApi, bookApi, metaApi } from '@/api'
+import { sharingApi, bookApi, metaApi, assessmentApi } from '@/api'
 import type {
   SharingCircle,
   SharedBook,
@@ -9,7 +9,8 @@ import type {
   InteractionType,
   Book,
   SharedBookBorrowStatus,
-  ExchangeInvitationStatus
+  ExchangeInvitationStatus,
+  AssessmentOverview
 } from '@/types'
 import { getLocalDateString } from '@/utils/date'
 
@@ -23,6 +24,7 @@ const themes = ref<BookTheme[]>([])
 const interactionTypes = ref<InteractionType[]>([])
 const currentUserId = ref('')
 const currentUserName = ref('')
+const assessmentOverview = ref<AssessmentOverview | null>(null)
 
 const activeTab = ref<'books' | 'invitations'>('books')
 const invitationTab = ref<'sent' | 'received'>('received')
@@ -101,6 +103,7 @@ const loadAll = async () => {
     await loadSharedBooks()
     await loadExchanges()
     await loadMySharedBooks()
+    assessmentOverview.value = await assessmentApi.getOverview().catch(() => null)
   } catch (e) {
     console.error('加载共享数据失败', e)
   } finally {
@@ -400,6 +403,24 @@ onMounted(() => {
         <button class="btn btn-outline" @click="openCircleModal">+ 创建共享圈</button>
         <button class="btn btn-outline" @click="openJoinCircleModal">👥 邀请成员</button>
         <button class="btn btn-primary" @click="openAddBookModal">+ 加入共享</button>
+      </div>
+    </div>
+
+    <div v-if="assessmentOverview && assessmentOverview.hasReport" class="assessment-alert-card">
+      <div class="assessment-alert-header">
+        <span class="assessment-icon">🌟</span>
+        <span class="assessment-title">成长评估命中</span>
+        <router-link to="/assessment" class="go-assessment-link">查看详情 →</router-link>
+      </div>
+      <div class="assessment-alert-content">
+        <span class="assessment-score" :style="{ color: assessmentOverview.latestScore >= 85 ? '#52c41a' : assessmentOverview.latestScore >= 65 ? '#1890ff' : assessmentOverview.latestScore >= 40 ? '#faad14' : '#ff4d4f' }">{{ assessmentOverview.latestScore }}分</span>
+        <span class="assessment-level">{{ assessmentOverview.latestLevel }}</span>
+        <span v-if="assessmentOverview.pendingInterventions > 0" class="assessment-intervention-count">{{ assessmentOverview.pendingInterventions }}条待执行建议</span>
+      </div>
+      <div v-if="assessmentOverview.dimensions && assessmentOverview.dimensions.find(d => d.key === 'exchangeExpansion') && (assessmentOverview.dimensions.find(d => d.key === 'exchangeExpansion').level === '需关注' || assessmentOverview.dimensions.find(d => d.key === 'exchangeExpansion').level === '一般')" class="assessment-dim-tags">
+        <span class="dim-tag" :class="assessmentOverview.dimensions.find(d => d.key === 'exchangeExpansion').level">
+          共享换书拓展度: {{ assessmentOverview.dimensions.find(d => d.key === 'exchangeExpansion').level }}
+        </span>
       </div>
     </div>
 
@@ -1364,5 +1385,90 @@ onMounted(() => {
   .inv-swap-row { grid-template-columns: 1fr; text-align: center; }
   .inv-arrow { transform: rotate(90deg); }
   .form-row { grid-template-columns: 1fr; }
+}
+
+.assessment-alert-card {
+  background: white;
+  border-radius: 12px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border-left: 4px solid #764ba2;
+}
+
+.assessment-alert-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.assessment-icon {
+  font-size: 20px;
+}
+
+.assessment-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #333;
+  flex: 1;
+}
+
+.go-assessment-link {
+  font-size: 13px;
+  color: #764ba2;
+  font-weight: 500;
+}
+
+.go-assessment-link:hover {
+  text-decoration: underline;
+}
+
+.assessment-alert-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.assessment-score {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.assessment-level {
+  font-size: 13px;
+  color: #666;
+}
+
+.assessment-intervention-count {
+  font-size: 12px;
+  padding: 2px 8px;
+  background: #fffbe6;
+  color: #fa8c16;
+  border-radius: 10px;
+}
+
+.assessment-dim-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.dim-tag {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 10px;
+}
+
+.dim-tag.需关注 {
+  background: #fff2f0;
+  color: #ff4d4f;
+}
+
+.dim-tag.一般 {
+  background: #fffbe6;
+  color: #faad14;
 }
 </style>

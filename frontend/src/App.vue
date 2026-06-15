@@ -16,7 +16,8 @@ const navItems = [
   { path: '/rotation', name: '轮换计划', icon: '📅' },
   { path: '/recommend', name: '月龄推荐', icon: '🎯' },
   { path: '/reading', name: '阅读打卡', icon: '📝' },
-  { path: '/statistics', name: '统计分析', icon: '📊' }
+  { path: '/statistics', name: '统计分析', icon: '📊' },
+  { path: '/assessment', name: '成长评估', icon: '🌟' }
 ]
 
 const loadBabyInfo = async () => {
