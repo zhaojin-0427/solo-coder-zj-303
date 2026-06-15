@@ -114,16 +114,9 @@ router.patch('/books/:id/status', (req, res) => {
 
 router.get('/borrow-records', (req, res) => {
   const { status, bookId } = req.query;
-  let filtered = [...borrowRecords];
+  let records = [...borrowRecords];
   
-  if (status) {
-    filtered = filtered.filter(b => b.status === status);
-  }
-  if (bookId) {
-    filtered = filtered.filter(b => b.bookId === bookId);
-  }
-  
-  for (const record of filtered) {
+  for (const record of records) {
     if (record.actualReturnDate) {
       record.status = '已归还';
     } else if (record.status === '借出中' && isOverdue(record.expectedReturnDate)) {
@@ -131,8 +124,15 @@ router.get('/borrow-records', (req, res) => {
     }
   }
   
-  filtered.sort((a, b) => new Date(b.borrowDate).getTime() - new Date(a.borrowDate).getTime());
-  res.json(filtered);
+  if (status) {
+    records = records.filter(b => b.status === status);
+  }
+  if (bookId) {
+    records = records.filter(b => b.bookId === bookId);
+  }
+  
+  records.sort((a, b) => new Date(b.borrowDate).getTime() - new Date(a.borrowDate).getTime());
+  res.json(records);
 });
 
 router.post('/borrow-records', (req, res) => {
@@ -371,7 +371,7 @@ router.get('/rotation-plans/current', (req, res) => {
   const { start, end } = getWeekRange(new Date());
   
   let currentPlan = rotationPlans.find(p => 
-    p.weekStartDate === start && p.weekEndDate === end && p.status === 'active'
+    p.weekStartDate === start && p.weekEndDate === end && (p.status === 'active' || p.status === 'completed')
   );
   
   if (!currentPlan) {
@@ -478,8 +478,14 @@ router.patch('/rotation-plans/:planId/items/:itemId/skip', (req, res) => {
   }
   
   const { skipReason } = req.body;
+  const reason = String(skipReason || '').trim();
+  if (!reason) {
+    res.status(400).json({ error: '跳过原因不能为空' });
+    return;
+  }
+  
   item.status = '跳过';
-  item.skipReason = String(skipReason || '');
+  item.skipReason = reason;
   item.updatedAt = new Date().toISOString();
   plan.updatedAt = new Date().toISOString();
   
@@ -521,6 +527,12 @@ router.patch('/rotation-plans/:planId/items/:itemId/status', (req, res) => {
   }
   
   const { status, readingRecordId, readDate } = req.body;
+  const validStatuses: RotationItemStatus[] = ['待读', '已读', '跳过', '重点'];
+  if (!validStatuses.includes(status as RotationItemStatus)) {
+    res.status(400).json({ error: '无效的状态值，必须为：待读、已读、跳过、重点' });
+    return;
+  }
+  
   item.status = status as RotationItemStatus;
   if (readingRecordId) item.readingRecordId = readingRecordId;
   if (readDate) item.readDate = readDate;
