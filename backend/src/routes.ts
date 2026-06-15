@@ -1250,7 +1250,14 @@ router.post('/assessments/generate', (req, res) => {
   let start: string;
   let end: string;
 
-  if (periodStart && periodEnd) {
+  const hasStart = !!periodStart;
+  const hasEnd = !!periodEnd;
+  if (hasStart !== hasEnd) {
+    res.status(400).json({ error: '日期范围不完整，请同时填写起始日期和结束日期，或都留空自动计算' });
+    return;
+  }
+
+  if (hasStart && hasEnd) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(periodStart) || !/^\d{4}-\d{2}-\d{2}$/.test(periodEnd)) {
       res.status(400).json({ error: '日期格式无效，需为 YYYY-MM-DD' });
       return;

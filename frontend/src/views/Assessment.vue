@@ -219,12 +219,22 @@ const handleGenerate = async () => {
     alert('请选择评估周期类型')
     return
   }
+  const hasStart = !!generateForm.value.periodStart
+  const hasEnd = !!generateForm.value.periodEnd
+  if (hasStart !== hasEnd) {
+    alert('日期范围不完整，请同时填写起始日期和结束日期，或都留空自动计算')
+    return
+  }
+  if (hasStart && hasEnd && generateForm.value.periodStart > generateForm.value.periodEnd) {
+    alert('起始日期不能晚于结束日期')
+    return
+  }
   generating.value = true
   try {
     const data: { periodType: AssessmentPeriodType; periodStart?: string; periodEnd?: string } = {
       periodType: generateForm.value.periodType
     }
-    if (generateForm.value.periodStart && generateForm.value.periodEnd) {
+    if (hasStart && hasEnd) {
       data.periodStart = generateForm.value.periodStart
       data.periodEnd = generateForm.value.periodEnd
     }
@@ -573,6 +583,9 @@ onMounted(() => {
           <div class="form-group">
             <label>结束日期（留空则自动计算本周/本月）</label>
             <input v-model="generateForm.periodEnd" type="date" />
+          </div>
+          <div v-if="(generateForm.periodStart && !generateForm.periodEnd) || (!generateForm.periodStart && generateForm.periodEnd)" class="form-error">
+            日期范围不完整，请同时填写起始日期和结束日期，或都留空自动计算
           </div>
           <div v-if="generateForm.periodStart && generateForm.periodEnd && generateForm.periodStart > generateForm.periodEnd" class="form-error">
             起始日期不能晚于结束日期

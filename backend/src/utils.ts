@@ -88,7 +88,10 @@ export function recommendBooks(
 }
 
 export function formatDate(date: Date): string {
-  return date.toISOString().split('T')[0];
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 export function getLocalDateString(): string {
@@ -115,8 +118,8 @@ export function getWeekRange(date: Date): { start: string; end: string } {
   const sunday = new Date(monday);
   sunday.setDate(monday.getDate() + 6);
   return {
-    start: monday.toISOString().split('T')[0],
-    end: sunday.toISOString().split('T')[0]
+    start: formatDate(monday),
+    end: formatDate(sunday)
   };
 }
 
@@ -753,7 +756,7 @@ export function getPeriodRange(type: 'week' | 'month', refDate?: Date): { start:
   const start = new Date(year, month, 1);
   const end = new Date(year, month + 1, 0);
   return {
-    start: start.toISOString().split('T')[0],
-    end: end.toISOString().split('T')[0]
+    start: formatDate(start),
+    end: formatDate(end)
   };
 }
