@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
+import { useRouter } from 'vue-router'
 import { statsApi, rotationApi } from '@/api'
 import type { Statistics, RotationPlanStats } from '@/types'
+
+const router = useRouter()
 import VChart from 'vue-echarts'
 import { use } from 'echarts/core'
 import { BarChart, PieChart, LineChart } from 'echarts/charts'
@@ -212,6 +215,53 @@ const skippedThemesChartOption = computed(() => {
   }
 })
 
+const exchangeThemeChartOption = computed(() => {
+  if (!stats.value || !stats.value.sharingStats || !stats.value.sharingStats.popularExchangeThemes || stats.value.sharingStats.popularExchangeThemes.length === 0) return {}
+  const data = stats.value.sharingStats.popularExchangeThemes
+  const colors = ['#667eea', '#764ba2', '#f093fb', '#f5576c', '#4facfe', '#43e97b', '#fa709a', '#fee140', '#30cfd0', '#a8edea']
+  return {
+    title: {
+      text: '热门交换主题',
+      left: 'center',
+      textStyle: { fontSize: 14, fontWeight: 600 }
+    },
+    tooltip: {
+      trigger: 'item',
+      formatter: '{b}: {c}次 ({d}%)'
+    },
+    legend: {
+      orient: 'vertical',
+      right: 10,
+      top: 'center',
+      textStyle: { fontSize: 12 }
+    },
+    series: [{
+      type: 'pie',
+      radius: ['40%', '70%'],
+      center: ['40%', '55%'],
+      avoidLabelOverlap: false,
+      itemStyle: {
+        borderRadius: 6,
+        borderColor: '#fff',
+        borderWidth: 2
+      },
+      label: { show: false },
+      emphasis: {
+        label: {
+          show: true,
+          fontSize: 14,
+          fontWeight: 'bold'
+        }
+      },
+      data: data.map((d, i) => ({
+        value: d.count,
+        name: d.theme,
+        itemStyle: { color: colors[i % colors.length] }
+      }))
+    }]
+  }
+})
+
 onMounted(() => {
   loadStats()
 })
@@ -224,6 +274,19 @@ onMounted(() => {
       <button class="btn btn-outline" @click="loadStats">
         🔄 刷新数据
       </button>
+    </div>
+
+    <div
+      v-if="stats?.sharingStats?.pendingInvitationsCount && stats.sharingStats.pendingInvitationsCount > 0"
+      class="pending-alert"
+      @click="router.push('/sharing')"
+    >
+      <span class="pending-icon">⚠️</span>
+      <div class="pending-content">
+        <strong>您有 {{ stats.sharingStats.pendingInvitationsCount }} 条待处理的换书邀约</strong>
+        <span class="pending-sub">点击前往「共享换书」页面查看处理</span>
+      </div>
+      <span class="pending-arrow">→</span>
     </div>
 
     <div v-if="rotationStats && rotationStats.hasPlan" class="rotation-stats-cards">
@@ -288,6 +351,37 @@ onMounted(() => {
       </div>
     </div>
 
+    <div class="sharing-stats-cards">
+      <div class="stat-card sharing-purple">
+        <div class="stat-icon">🔄</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats?.sharingStats?.sharedBooksCount || 0 }}</div>
+          <div class="stat-label">共享绘本数量</div>
+        </div>
+      </div>
+      <div class="stat-card sharing-green">
+        <div class="stat-icon">✅</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats?.sharingStats?.exchangeCompletionRate ?? 0 }}%</div>
+          <div class="stat-label">换书完成率</div>
+        </div>
+      </div>
+      <div class="stat-card sharing-blue">
+        <div class="stat-icon">👨‍👩‍👧</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats?.sharingStats?.activeCirclesCount || 0 }}</div>
+          <div class="stat-label">活跃共享圈</div>
+        </div>
+      </div>
+      <div class="stat-card sharing-orange">
+        <div class="stat-icon">💌</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ stats?.sharingStats?.pendingInvitationsCount || 0 }}</div>
+          <div class="stat-label">待处理邀约</div>
+        </div>
+      </div>
+    </div>
+
     <div v-if="loading" class="loading">加载中...</div>
 
     <div v-else class="charts-grid">
@@ -313,6 +407,21 @@ onMounted(() => {
         <div class="no-skipped-content">
           <span class="happy-icon">😊</span>
           <p>太棒了！本周没有跳过任何绘本</p>
+        </div>
+      </div>
+      <div
+        v-if="stats?.sharingStats?.popularExchangeThemes && stats.sharingStats.popularExchangeThemes.length > 0"
+        class="chart-card"
+      >
+        <v-chart :option="exchangeThemeChartOption" style="height: 300px;" autoresize />
+      </div>
+      <div
+        v-else
+        class="chart-card no-exchange-card"
+      >
+        <div class="no-skipped-content">
+          <span class="happy-icon">🔄</span>
+          <p>暂无换书记录，快去共享换书页面发起第一次换书吧</p>
         </div>
       </div>
       <div class="chart-card idle-books-card">
@@ -348,11 +457,76 @@ onMounted(() => {
   margin: 0 auto;
 }
 
+.pending-alert {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, #fff7e6 0%, #ffe7ba 100%);
+  border: 1px solid #ffd591;
+  border-radius: 12px;
+  margin-bottom: 24px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.pending-alert:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(250, 173, 20, 0.2);
+}
+
+.pending-icon {
+  font-size: 28px;
+  flex-shrink: 0;
+}
+
+.pending-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.pending-content strong {
+  font-size: 15px;
+  color: #d46b08;
+  font-weight: 600;
+}
+
+.pending-sub {
+  font-size: 12px;
+  color: #fa8c16;
+}
+
+.pending-arrow {
+  font-size: 20px;
+  color: #d46b08;
+  font-weight: bold;
+}
+
 .rotation-stats-cards {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 16px;
   margin-bottom: 24px;
+}
+
+.sharing-stats-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.stat-card.sharing-purple { border-left-color: #722ed1; }
+.stat-card.sharing-green { border-left-color: #52c41a; }
+.stat-card.sharing-blue { border-left-color: #1890ff; }
+.stat-card.sharing-orange { border-left-color: #fa8c16; }
+
+.no-exchange-card {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .rotation-stat-card {
@@ -564,7 +738,8 @@ onMounted(() => {
 
 @media (max-width: 900px) {
   .rotation-stats-cards,
-  .stats-cards {
+  .stats-cards,
+  .sharing-stats-cards {
     grid-template-columns: repeat(2, 1fr);
   }
   .charts-grid {

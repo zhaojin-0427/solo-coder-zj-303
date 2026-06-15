@@ -88,6 +88,7 @@ export interface Statistics {
   popularThemes: ThemeStats[];
   idleBooks: Book[];
   borrowedBooksCount: number;
+  sharingStats: SharingStats;
 }
 
 export interface RecommendationResponse {
@@ -137,4 +138,76 @@ export interface RotationPlanStats {
   completionRate: number;
   hitRate: number;
   skippedThemes: ThemeStats[];
+}
+
+export type SharingMemberRole = '创建者' | '成员';
+
+export interface SharingCircleMember {
+  id: string;
+  name: string;
+  role: SharingMemberRole;
+  joinedAt: string;
+  avatar?: string;
+}
+
+export interface SharingCircle {
+  id: string;
+  name: string;
+  description?: string;
+  creatorId: string;
+  creatorName: string;
+  members: SharingCircleMember[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SharedBookBorrowStatus = '可借' | '借出中' | '已预留' | '已转送';
+
+export interface SharedBook {
+  id: string;
+  circleId: string;
+  bookId: string;
+  book: Book;
+  ownerId: string;
+  ownerName: string;
+  borrowCycleDays: number;
+  preferredExchangeThemes: BookTheme[];
+  acceptTransfer: boolean;
+  notes?: string;
+  borrowStatus: SharedBookBorrowStatus;
+  currentBorrowerId?: string;
+  currentBorrowerName?: string;
+  addedAt: string;
+  updatedAt: string;
+}
+
+export type ExchangeInvitationStatus = '待确认' | '已接受' | '已拒绝' | '已完成' | '已取消';
+
+export interface ExchangeInvitation {
+  id: string;
+  circleId: string;
+  initiatorId: string;
+  initiatorName: string;
+  targetBookId: string;
+  targetBook: SharedBook;
+  offeredBookId: string;
+  offeredBook: SharedBook;
+  expectedExchangeDate: string;
+  message?: string;
+  status: ExchangeInvitationStatus;
+  rejectReason?: string;
+  responseAt?: string;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SharingStats {
+  sharedBooksCount: number;
+  exchangeCompletionRate: number;
+  popularExchangeThemes: ThemeStats[];
+  pendingInvitationsCount: number;
+  activeCirclesCount: number;
+  totalExchangesCount: number;
+  completedExchangesCount: number;
 }

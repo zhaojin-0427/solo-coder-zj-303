@@ -1,13 +1,16 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import { bookApi, metaApi } from '@/api'
-import type { Book, BookStatus, InteractionType, BookTheme } from '@/types'
+import { useRouter } from 'vue-router'
+import { bookApi, metaApi, sharingApi } from '@/api'
+import type { Book, BookStatus, InteractionType, BookTheme, SharedBook } from '@/types'
 import { getLocalDateString } from '@/utils/date'
 
+const router = useRouter()
 const books = ref<Book[]>([])
 const themes = ref<BookTheme[]>([])
 const interactionTypes = ref<InteractionType[]>([])
 const loading = ref(false)
+const mySharedBooks = ref<SharedBook[]>([])
 
 const searchKeyword = ref('')
 const filterStatus = ref<string>('')
@@ -47,6 +50,22 @@ const loadMeta = async () => {
   } catch (e) {
     console.error('加载元数据失败', e)
   }
+}
+
+const loadMySharedBooks = async () => {
+  try {
+    mySharedBooks.value = await sharingApi.getMySharedBooks()
+  } catch (e) {
+    console.error('加载我的共享绘本失败', e)
+  }
+}
+
+const isBookShared = (bookId: string) => {
+  return mySharedBooks.value.some(sb => sb.bookId === bookId)
+}
+
+const getSharedBookInfo = (bookId: string) => {
+  return mySharedBooks.value.find(sb => sb.bookId === bookId)
 }
 
 const openAddModal = () => {
@@ -119,6 +138,7 @@ const stats = computed(() => {
 
 onMounted(() => {
   loadMeta().then(() => loadBooks())
+  loadMySharedBooks()
 })
 </script>
 
@@ -187,6 +207,9 @@ onMounted(() => {
             <span class="tag theme-tag">{{ book.theme }}</span>
             <span class="tag age-tag">{{ book.minMonth }}-{{ book.maxMonth }}月</span>
             <span class="tag interact-tag">{{ book.interactionType }}</span>
+            <span v-if="isBookShared(book.id)" class="tag sharing-tag" :title="'共享状态：' + (getSharedBookInfo(book.id)?.borrowStatus)">
+              🔄 已共享 · {{ getSharedBookInfo(book.id)?.borrowStatus }}
+            </span>
           </div>
           <div class="book-status">
             <span
@@ -206,6 +229,10 @@ onMounted(() => {
               <button v-if="book.status === '借出'" @click="updateStatus(book, '在家')">标记归还</button>
               <button v-if="book.status === '在家'" @click="updateStatus(book, '预留')">标记预留</button>
               <button v-if="book.status === '在家'" @click="updateStatus(book, '转送')">标记转送</button>
+              <button class="divider" disabled></button>
+              <button v-if="book.status === '在家' && !isBookShared(book.id)" @click="router.push('/sharing')">加入共享书单</button>
+              <button v-if="isBookShared(book.id)" @click="router.push('/sharing')">管理共享 / 查看邀约</button>
+              <button class="divider" disabled></button>
               <button class="danger" @click="deleteBook(book.id)">删除</button>
             </div>
           </div>
@@ -506,6 +533,12 @@ onMounted(() => {
   color: #fa8c16;
 }
 
+.sharing-tag {
+  background: linear-gradient(135deg, #e0f7fa 0%, #e1bee7 100%);
+  color: #7b1fa2;
+  font-weight: 500;
+}
+
 .status-badge {
   font-size: 11px;
   padding: 3px 8px;
@@ -573,6 +606,18 @@ onMounted(() => {
 
 .dropdown-menu button.danger {
   color: #ff4d4f;
+}
+
+.dropdown-menu button.divider {
+  height: 1px;
+  padding: 0;
+  margin: 4px 8px;
+  background: #f0f0f0;
+  cursor: default;
+}
+
+.dropdown-menu button.divider:hover {
+  background: #f0f0f0;
 }
 
 .empty-state {

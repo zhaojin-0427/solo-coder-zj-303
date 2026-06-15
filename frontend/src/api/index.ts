@@ -9,7 +9,11 @@ import type {
   BookStatus,
   RotationPlan,
   RotationPlanItem,
-  RotationPlanStats
+  RotationPlanStats,
+  SharingCircle,
+  SharedBook,
+  ExchangeInvitation,
+  BookTheme
 } from '@/types';
 
 const api = axios.create({
@@ -90,4 +94,61 @@ export const rotationApi = {
   updateItemStatus: (planId: string, itemId: string, status: string, readingRecordId?: string, readDate?: string) =>
     api.patch<RotationPlanItem>(`/rotation-plans/${planId}/items/${itemId}/status`, { status, readingRecordId, readDate }).then(r => r.data),
   getStats: () => api.get<RotationPlanStats>('/rotation-plans/stats/summary').then(r => r.data)
+};
+
+export const sharingApi = {
+  getCircles: () => api.get<SharingCircle[]>('/sharing/circles').then(r => r.data),
+  getCircle: (id: string) => api.get<SharingCircle>(`/sharing/circles/${id}`).then(r => r.data),
+  createCircle: (data: { name: string; description?: string }) =>
+    api.post<SharingCircle>('/sharing/circles', data).then(r => r.data),
+  joinCircle: (circleId: string, memberName: string) =>
+    api.post<SharingCircle>(`/sharing/circles/${circleId}/join`, { memberName }).then(r => r.data),
+  deleteCircle: (id: string) => api.delete(`/sharing/circles/${id}`).then(r => r.data),
+
+  getSharedBooks: (params?: {
+    circleId?: string;
+    theme?: string;
+    minMonth?: number;
+    maxMonth?: number;
+    interactionType?: string;
+    borrowStatus?: string;
+    ownerId?: string;
+  }) => api.get<SharedBook[]>('/sharing/books', { params }).then(r => r.data),
+  getMySharedBooks: () => api.get<SharedBook[]>('/sharing/books/mine').then(r => r.data),
+  addSharedBook: (data: {
+    circleId: string;
+    bookId: string;
+    borrowCycleDays?: number;
+    preferredExchangeThemes?: BookTheme[];
+    acceptTransfer?: boolean;
+    notes?: string;
+  }) => api.post<SharedBook>('/sharing/books', data).then(r => r.data),
+  updateSharedBook: (id: string, data: {
+    borrowCycleDays?: number;
+    preferredExchangeThemes?: BookTheme[];
+    acceptTransfer?: boolean;
+    notes?: string;
+  }) => api.put<SharedBook>(`/sharing/books/${id}`, data).then(r => r.data),
+  removeSharedBook: (id: string) => api.delete(`/sharing/books/${id}`).then(r => r.data),
+
+  getExchanges: (params?: { status?: string; type?: 'sent' | 'received' }) =>
+    api.get<ExchangeInvitation[]>('/sharing/exchanges', { params }).then(r => r.data),
+  createExchange: (data: {
+    circleId: string;
+    targetBookId: string;
+    offeredBookId: string;
+    expectedExchangeDate: string;
+    message?: string;
+  }) => api.post<ExchangeInvitation>('/sharing/exchanges', data).then(r => r.data),
+  acceptExchange: (id: string) =>
+    api.post<ExchangeInvitation>(`/sharing/exchanges/${id}/accept`).then(r => r.data),
+  rejectExchange: (id: string, rejectReason?: string) =>
+    api.post<ExchangeInvitation>(`/sharing/exchanges/${id}/reject`, { rejectReason }).then(r => r.data),
+  cancelExchange: (id: string) =>
+    api.post<ExchangeInvitation>(`/sharing/exchanges/${id}/cancel`).then(r => r.data),
+  completeExchange: (id: string) =>
+    api.post<ExchangeInvitation>(`/sharing/exchanges/${id}/complete`).then(r => r.data),
+
+  getCurrentUser: () =>
+    api.get<{ userId: string; userName: string }>('/sharing/current-user').then(r => r.data)
 };

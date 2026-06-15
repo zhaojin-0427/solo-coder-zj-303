@@ -1,5 +1,5 @@
 import { v4 as uuidv4 } from 'uuid';
-import { Book, BorrowRecord, ReadingRecord, BabyInfo, BookTheme, InteractionType, RotationPlan } from './types';
+import { Book, BorrowRecord, ReadingRecord, BabyInfo, BookTheme, InteractionType, RotationPlan, SharingCircle, SharedBook, ExchangeInvitation } from './types';
 
 export const babyInfo: BabyInfo = {
   name: '小宝',
@@ -258,3 +258,136 @@ export const themes: BookTheme[] = [
 export const interactionTypes: InteractionType[] = ['翻翻', '触摸', '发声', '普通'];
 
 export let rotationPlans: RotationPlan[] = [];
+
+export const CURRENT_USER_ID = 'user-self';
+export const CURRENT_USER_NAME = '小宝妈妈';
+
+export let sharingCircles: SharingCircle[] = [
+  {
+    id: uuidv4(),
+    name: '小区亲友绘本共享圈',
+    description: '小区邻居和亲友们的绘本共享交流平台',
+    creatorId: CURRENT_USER_ID,
+    creatorName: CURRENT_USER_NAME,
+    members: [
+      { id: CURRENT_USER_ID, name: CURRENT_USER_NAME, role: '创建者', joinedAt: '2025-05-01T00:00:00.000Z' },
+      { id: 'user-2', name: '小明妈妈', role: '成员', joinedAt: '2025-05-05T00:00:00.000Z' },
+      { id: 'user-3', name: '小红爸爸', role: '成员', joinedAt: '2025-05-10T00:00:00.000Z' },
+      { id: 'user-4', name: '小华妈妈', role: '成员', joinedAt: '2025-05-15T00:00:00.000Z' }
+    ],
+    createdAt: '2025-05-01T00:00:00.000Z',
+    updatedAt: '2025-05-01T00:00:00.000Z'
+  }
+];
+
+export let sharedBooks: SharedBook[] = [
+  {
+    id: uuidv4(),
+    circleId: sharingCircles[0].id,
+    bookId: bookIds[0],
+    book: books[0],
+    ownerId: CURRENT_USER_ID,
+    ownerName: CURRENT_USER_NAME,
+    borrowCycleDays: 14,
+    preferredExchangeThemes: ['认知启蒙', '自然科普'],
+    acceptTransfer: false,
+    notes: '书本保持完好，无涂鸦',
+    borrowStatus: '可借',
+    addedAt: '2025-05-02T00:00:00.000Z',
+    updatedAt: '2025-05-02T00:00:00.000Z'
+  },
+  {
+    id: uuidv4(),
+    circleId: sharingCircles[0].id,
+    bookId: bookIds[1],
+    book: books[1],
+    ownerId: CURRENT_USER_ID,
+    ownerName: CURRENT_USER_NAME,
+    borrowCycleDays: 7,
+    preferredExchangeThemes: ['情绪管理', '品格培养'],
+    acceptTransfer: true,
+    notes: '可接受转送',
+    borrowStatus: '可借',
+    addedAt: '2025-05-03T00:00:00.000Z',
+    updatedAt: '2025-05-03T00:00:00.000Z'
+  },
+  {
+    id: uuidv4(),
+    circleId: sharingCircles[0].id,
+    bookId: bookIds[3],
+    book: books[3],
+    ownerId: CURRENT_USER_ID,
+    ownerName: CURRENT_USER_NAME,
+    borrowCycleDays: 10,
+    preferredExchangeThemes: ['品格培养', '习惯养成'],
+    acceptTransfer: false,
+    borrowStatus: '可借',
+    addedAt: '2025-05-04T00:00:00.000Z',
+    updatedAt: '2025-05-04T00:00:00.000Z'
+  },
+  {
+    id: uuidv4(),
+    circleId: sharingCircles[0].id,
+    bookId: bookIds[5],
+    book: books[5],
+    ownerId: 'user-2',
+    ownerName: '小明妈妈',
+    borrowCycleDays: 7,
+    preferredExchangeThemes: ['认知启蒙', '语言启蒙'],
+    acceptTransfer: false,
+    notes: '发声功能完好',
+    borrowStatus: '可借',
+    addedAt: '2025-05-08T00:00:00.000Z',
+    updatedAt: '2025-05-08T00:00:00.000Z'
+  },
+  {
+    id: uuidv4(),
+    circleId: sharingCircles[0].id,
+    bookId: bookIds[7],
+    book: books[7],
+    ownerId: 'user-3',
+    ownerName: '小红爸爸',
+    borrowCycleDays: 14,
+    preferredExchangeThemes: ['情绪管理', '艺术审美'],
+    acceptTransfer: true,
+    borrowStatus: '借出中',
+    currentBorrowerId: CURRENT_USER_ID,
+    currentBorrowerName: CURRENT_USER_NAME,
+    addedAt: '2025-05-12T00:00:00.000Z',
+    updatedAt: '2025-06-05T00:00:00.000Z'
+  }
+];
+
+export let exchangeInvitations: ExchangeInvitation[] = [
+  {
+    id: uuidv4(),
+    circleId: sharingCircles[0].id,
+    initiatorId: 'user-2',
+    initiatorName: '小明妈妈',
+    targetBookId: sharedBooks[0].id,
+    targetBook: sharedBooks[0],
+    offeredBookId: sharedBooks[3].id,
+    offeredBook: sharedBooks[3],
+    expectedExchangeDate: '2025-06-20',
+    message: '我家宝宝很喜欢毛毛虫，想换一下看看',
+    status: '待确认',
+    createdAt: '2025-06-10T00:00:00.000Z',
+    updatedAt: '2025-06-10T00:00:00.000Z'
+  },
+  {
+    id: uuidv4(),
+    circleId: sharingCircles[0].id,
+    initiatorId: CURRENT_USER_ID,
+    initiatorName: CURRENT_USER_NAME,
+    targetBookId: sharedBooks[3].id,
+    targetBook: sharedBooks[3],
+    offeredBookId: sharedBooks[1].id,
+    offeredBook: sharedBooks[1],
+    expectedExchangeDate: '2025-06-18',
+    message: '想借这本发声书给宝宝听听',
+    status: '已接受',
+    responseAt: '2025-06-12T00:00:00.000Z',
+    createdAt: '2025-06-08T00:00:00.000Z',
+    updatedAt: '2025-06-12T00:00:00.000Z'
+  }
+];

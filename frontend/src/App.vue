@@ -12,6 +12,7 @@ const editBaby = ref<Partial<BabyInfo>>({})
 const navItems = [
   { path: '/books', name: '绘本档案', icon: '📚' },
   { path: '/borrow', name: '借阅记录', icon: '📖' },
+  { path: '/sharing', name: '共享换书', icon: '🔄' },
   { path: '/rotation', name: '轮换计划', icon: '📅' },
   { path: '/recommend', name: '月龄推荐', icon: '🎯' },
   { path: '/reading', name: '阅读打卡', icon: '📝' },
